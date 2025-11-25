@@ -37,7 +37,7 @@ export class GameEngine {
         lastMilestone: 0,
         wallBounceTimer: 0,
         flashTimer: 0,
-        dashBuffer: 0, // New: Input buffering
+        dashBuffer: 0, 
         hasTriggeredRecord: false
     };
     
@@ -221,7 +221,7 @@ export class GameEngine {
         this.particles = [];
         this.ripples = [];
         
-        // Ground: Optimized size to prevent lag (reduced height to 48px from 400px)
+        // Ground: Optimized size to prevent lag (reduced from 400)
         this.solids.push({ x: -50, y: 150, w: VIEW_WIDTH + 100, h: 48 });
         
         this.spawnY = 0;
@@ -367,11 +367,30 @@ export class GameEngine {
             } 
             else if (Math.random() < 0.15) {
                 const side = Math.random() > 0.5 ? 'right' : 'left';
+                // FIX: Ensure spring is attached to the OUTER side of the block
+                // If Side is Right (pushes right), it must be on the RIGHT edge of a block located to its LEFT.
+                // x is block left edge. x+w is block right edge.
+                // Side Right Spring: x = block.x + block.w. 
+                
                 const springX = side === 'right' ? x + w : x - TILE_SIZE;
                 const springY = (currentY - hS) + Math.floor(Math.random() * hTiles) * TILE_SIZE;
                 
+                // Check valid placement
+                let valid = false;
                 if (springX >= 0 && springX < VIEW_WIDTH) {
-                    // Safety check neighbors
+                    if (side === 'right') {
+                        // Spring at x+w. Needs block at left (x+w-TILE_SIZE), which is inside the block we just made. OK.
+                        // Ensure NO block at right (springX + TILE_SIZE).
+                        if (!this.isSolidAt(springX + TILE_SIZE, springY)) valid = true;
+                    } else {
+                        // Spring at x-TILE. Needs block at right (x), which is inside block. OK.
+                        // Ensure NO block at left (springX - TILE_SIZE).
+                        if (!this.isSolidAt(springX - TILE_SIZE, springY)) valid = true;
+                    }
+                }
+
+                if (valid) {
+                    // Safety check vertical neighbors for 1-gap
                     if (!this.isSolidAt(springX, springY - TILE_SIZE) && !this.isSolidAt(springX, springY + TILE_SIZE)) {
                         this.springs.push({
                             x: springX, y: springY,
@@ -446,6 +465,17 @@ export class GameEngine {
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         for (const s of this.solids) {
             if (this.AABB(rect, s)) {
+                // Seam/Corner Snagging Fix:
+                // If the player is grounded and only clipping the top edge of the wall,
+                // treat it as a step and don't stop horizontal movement.
+                // 4px threshold for "step up"
+                const distFromTop = (p.y + p.h) - s.y;
+                if (p.grounded && distFromTop < 6 && distFromTop > 0) {
+                    // Simply snap up
+                    p.y = s.y - p.h;
+                    continue;
+                }
+
                 if (p.vx > 0) {
                     p.x = s.x - p.w;
                     p.vx = 0;

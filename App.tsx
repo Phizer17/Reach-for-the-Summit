@@ -171,7 +171,7 @@ const App = () => {
   };
 
   return (
-    <div className="relative w-full h-screen bg-gray-900 flex justify-center overflow-hidden font-mono text-white">
+    <div className="relative w-full h-[100dvh] bg-gray-900 flex justify-center overflow-hidden font-mono text-white">
       <div className="relative w-full h-full max-w-[540px] shadow-2xl">
         <canvas ref={canvasRef} className="block w-full h-full" />
 
@@ -218,7 +218,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_24_fix</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_25</div>
           </div>
         )}
 
@@ -258,37 +258,39 @@ const App = () => {
         )}
 
         {/* Mobile Controls Overlay - Changed md:hidden to lg:hidden to show on tablets/large phones */}
-        <div className="absolute bottom-0 left-0 w-full h-full pointer-events-none z-40 lg:hidden">
-            {/* D-Pad Area */}
-            <div className="absolute bottom-8 left-4 flex gap-4 pointer-events-auto">
-               <div 
-                 className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
-                 onTouchStart={handleTouchStart('left')} onTouchEnd={handleTouchEnd('left')}
-               >
-                 <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-               </div>
-               <div 
-                 className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
-                 onTouchStart={handleTouchStart('right')} onTouchEnd={handleTouchEnd('right')}
-               >
-                 <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-               </div>
-            </div>
+        <div className="absolute inset-0 pointer-events-none z-40 lg:hidden flex flex-col justify-end pb-8 px-4">
+            <div className="flex justify-between w-full items-end">
+              {/* D-Pad Area */}
+              <div className="flex gap-4 pointer-events-auto">
+                 <div 
+                   className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
+                   onTouchStart={handleTouchStart('left')} onTouchEnd={handleTouchEnd('left')}
+                 >
+                   <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                 </div>
+                 <div 
+                   className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
+                   onTouchStart={handleTouchStart('right')} onTouchEnd={handleTouchEnd('right')}
+                 >
+                   <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                 </div>
+              </div>
 
-            {/* Action Buttons */}
-            <div className="absolute bottom-8 right-4 flex flex-col gap-4 pointer-events-auto">
-               <div 
-                 className="w-20 h-20 bg-indigo-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
-                 onTouchStart={handleTouchStart('jump')} onTouchEnd={handleTouchEnd('jump')}
-               >
-                  <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
-               </div>
-               <div 
-                 className="w-20 h-20 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
-                 onTouchStart={handleTouchStart('dash')} onTouchEnd={handleTouchEnd('dash')}
-               >
-                  <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path transform="translate(0, 3)" d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41M7.41,9.41L12,4.83L16.59,9.41L18,8L12,2L6,8L7.41,9.41Z"/></svg>
-               </div>
+              {/* Action Buttons */}
+              <div className="flex flex-col gap-4 pointer-events-auto">
+                 <div 
+                   className="w-20 h-20 bg-indigo-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+                   onTouchStart={handleTouchStart('jump')} onTouchEnd={handleTouchEnd('jump')}
+                 >
+                    <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
+                 </div>
+                 <div 
+                   className="w-20 h-20 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+                   onTouchStart={handleTouchStart('dash')} onTouchEnd={handleTouchEnd('dash')}
+                 >
+                    <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path transform="translate(0, 3)" d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41M7.41,9.41L12,4.83L16.59,9.41L18,8L12,2L6,8L7.41,9.41Z"/></svg>
+                 </div>
+              </div>
             </div>
         </div>
       </div>
