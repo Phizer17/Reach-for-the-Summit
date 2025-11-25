@@ -218,7 +218,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_24</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_24_fix</div>
           </div>
         )}
 
