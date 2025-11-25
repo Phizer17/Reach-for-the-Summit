@@ -102,6 +102,12 @@ export class GameEngine {
         if(this.ctx) this.ctx.imageSmoothingEnabled = false;
     }
 
+    vibrate(ms: number) {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            navigator.vibrate(ms);
+        }
+    }
+
     loadTextures() {
         // --- TILESET ATLAS (96x72) ---
         const c = {
@@ -221,7 +227,7 @@ export class GameEngine {
         this.particles = [];
         this.ripples = [];
         
-        // Ground: Optimized size to prevent lag (reduced from 400)
+        // Ground: Optimized size
         this.solids.push({ x: -50, y: 150, w: VIEW_WIDTH + 100, h: 48 });
         
         this.spawnY = 0;
@@ -354,7 +360,6 @@ export class GameEngine {
             // --- SPRING GENERATION ---
             if (Math.random() < 0.15) {
                 const springX = x + Math.floor(Math.random() * wTiles) * TILE_SIZE;
-                // Prevent spawning in tight gaps
                 if (!this.isSolidAt(springX - TILE_SIZE, currentY - hS - TILE_SIZE) && 
                     !this.isSolidAt(springX + TILE_SIZE, currentY - hS - TILE_SIZE)) {
                         this.springs.push({
@@ -367,30 +372,21 @@ export class GameEngine {
             } 
             else if (Math.random() < 0.15) {
                 const side = Math.random() > 0.5 ? 'right' : 'left';
-                // FIX: Ensure spring is attached to the OUTER side of the block
-                // If Side is Right (pushes right), it must be on the RIGHT edge of a block located to its LEFT.
-                // x is block left edge. x+w is block right edge.
-                // Side Right Spring: x = block.x + block.w. 
-                
                 const springX = side === 'right' ? x + w : x - TILE_SIZE;
                 const springY = (currentY - hS) + Math.floor(Math.random() * hTiles) * TILE_SIZE;
                 
-                // Check valid placement
                 let valid = false;
                 if (springX >= 0 && springX < VIEW_WIDTH) {
                     if (side === 'right') {
-                        // Spring at x+w. Needs block at left (x+w-TILE_SIZE), which is inside the block we just made. OK.
-                        // Ensure NO block at right (springX + TILE_SIZE).
-                        if (!this.isSolidAt(springX + TILE_SIZE, springY)) valid = true;
+                        // Side Right Spring: must have solid on its LEFT.
+                        if (this.isSolidAt(springX - TILE_SIZE, springY)) valid = true;
                     } else {
-                        // Spring at x-TILE. Needs block at right (x), which is inside block. OK.
-                        // Ensure NO block at left (springX - TILE_SIZE).
-                        if (!this.isSolidAt(springX - TILE_SIZE, springY)) valid = true;
+                        // Side Left Spring: must have solid on its RIGHT.
+                        if (this.isSolidAt(springX + TILE_SIZE, springY)) valid = true;
                     }
                 }
 
                 if (valid) {
-                    // Safety check vertical neighbors for 1-gap
                     if (!this.isSolidAt(springX, springY - TILE_SIZE) && !this.isSolidAt(springX, springY + TILE_SIZE)) {
                         this.springs.push({
                             x: springX, y: springY,
@@ -462,20 +458,11 @@ export class GameEngine {
 
     resolveSolidsX() {
         const p = this.player;
-        const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
+        // FIX: Reduce bottom of hitbox by 6px for X collision to prevent seam snagging
+        const rect = { x: p.x, y: p.y, w: p.w, h: p.h - 6 };
+        
         for (const s of this.solids) {
             if (this.AABB(rect, s)) {
-                // Seam/Corner Snagging Fix:
-                // If the player is grounded and only clipping the top edge of the wall,
-                // treat it as a step and don't stop horizontal movement.
-                // 4px threshold for "step up"
-                const distFromTop = (p.y + p.h) - s.y;
-                if (p.grounded && distFromTop < 6 && distFromTop > 0) {
-                    // Simply snap up
-                    p.y = s.y - p.h;
-                    continue;
-                }
-
                 if (p.vx > 0) {
                     p.x = s.x - p.w;
                     p.vx = 0;
@@ -507,16 +494,16 @@ export class GameEngine {
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         
         for (const s of this.springs) {
-            // Use slightly smaller hitbox for interaction trigger to prevent corner bugs
             if (this.AABB(rect, { x: s.x + 6, y: s.y + 6, w: s.w - 12, h: s.h - 12 })) {
                 sfx.play('spring');
+                this.vibrate(30); // Haptic
                 s.animTimer = 0.2;
                 
                 // Restore State
                 p.canDash = true; 
                 p.isDashing = false;
                 p.dashTimer = 0;
-                p.flashTimer = 0.1; // Flash
+                p.flashTimer = 0.1; 
                 
                 if (s.dir === 'up') {
                     p.vy = SPRING_SPEED_Y;
@@ -545,18 +532,16 @@ export class GameEngine {
         // Crystals
         for (const c of this.crystals) {
             if (c.respawnTimer <= 0 && this.AABB(rect, c)) {
-                // Buffering check: If dash pressed recently, trigger it now
                 const dashQueued = p.dashBuffer > 0;
                 if (!p.canDash || dashQueued) {
                     p.canDash = true;
                     c.respawnTimer = 2.5;
                     sfx.play('crystal');
+                    this.vibrate(50); // Haptic
                     this.hitStop = 0.05;
                     this.shake = 4;
                     p.flashTimer = 0.1;
                     this.spawnEffect(c.x + 15, c.y + 15, COLORS.crystal, 5);
-                    
-                    // Auto Dash from buffer is handled in updatePhysicsSubStep
                 }
             }
         }
@@ -566,8 +551,6 @@ export class GameEngine {
             if (b.state === 0 && this.AABB(rect, b)) {
                 b.state = 1;
                 p.followingBerries.push(b);
-                // Settle streak is reset when grounded logic runs, but pickup sound uses current length
-                // We'll play a simple pickup sound here, combo sound happens on collect (landing)
                 sfx.play('berry', p.followingBerries.length); 
             }
         }
@@ -648,18 +631,15 @@ export class GameEngine {
         if(p.flashTimer > 0) p.flashTimer -= dt;
         if(p.dashBuffer > 0) p.dashBuffer -= dt;
 
-        // Buffer Input
         if (input.dash && !p.canDash) {
-            p.dashBuffer = 0.08; // 80ms buffer
+            p.dashBuffer = 0.08; 
         }
 
-        // Camera
         const targetY = p.y - this.viewHeight * 0.45;
         if (targetY < this.cameraY) {
             this.cameraY += (targetY - this.cameraY) * 0.15;
         }
 
-        // Score
         const h = Math.floor(Math.abs(p.y) / 10);
         const isRecord = this.highScore > 0 && h > this.highScore;
         if (h > p.highestY) {
@@ -676,24 +656,20 @@ export class GameEngine {
             }
         }
 
-        // Death Check
         if (p.y > this.cameraY + this.viewHeight + 100) {
             this.die();
             return;
         }
 
-        // Timers
         if (p.grounded) p.coyoteTimer = 0.1; else p.coyoteTimer -= dt;
         if (input.jump) p.jumpBuffer = 0.15;
         if (p.jumpBuffer > 0) p.jumpBuffer -= dt;
         if (p.wallJumpTimer > 0) p.wallJumpTimer -= dt;
 
-        // Spring Animations
         this.springs.forEach(s => {
             if (s.animTimer > 0) s.animTimer -= dt;
         });
 
-        // Wall Bounce Grace Period
         if (p.isDashing && p.dashDx === 0 && p.dashDy === -1) {
             p.wallBounceTimer = 0.08; 
         } else {
@@ -706,15 +682,12 @@ export class GameEngine {
         
         while(remainingDt > 0) {
             const step = Math.min(remainingDt, MAX_STEP);
-            // Check Buffer Dash execution inside physics step for frame-perfect feel?
-            // Actually, we need to inject the dash input if buffer is valid and canDash is true
             const effectiveDash = input.dash || (p.dashBuffer > 0 && p.canDash);
             
             this.updatePhysicsSubStep(step, { ...input, dash: effectiveDash });
             remainingDt -= step;
         }
 
-        // Visual Effects after physics
         if (!wasGrounded && p.grounded) {
             p.sx = 1.4; p.sy = 0.6;
             if (!p.canDash) p.flashTimer = 0.1; 
@@ -722,7 +695,6 @@ export class GameEngine {
         
         this.checkEntityCollisions();
         
-        // Berry Following Smoothing
         p.followingBerries.forEach((b, i) => {
             const delay = (i + 1) * 8;
             if (delay < p.history.length) {
@@ -743,42 +715,36 @@ export class GameEngine {
             }
         });
 
-        // Berry Collection (Combo Logic)
         if (p.grounded && p.followingBerries.length > 0) {
             p.settleTimer += dt;
-            if (p.settleTimer > 0.15) { // Fast interval
+            if (p.settleTimer > 0.15) { 
                 const b = p.followingBerries.shift();
                 if (b) {
                     b.state = 2;
                     p.score++;
                     this.onScoreUpdate(Math.floor(Math.abs(p.y)/10), p.score, isRecord);
                     p.settleStreak++;
-                    sfx.play('berry', p.settleStreak); // Play ascending tone
+                    sfx.play('berry', p.settleStreak); 
                     this.spawnEffect(p.x + 12, p.y + 12, COLORS.berry, 8);
                     this.spawnRipple(p.x + 12, p.y + 12);
-                    p.settleTimer = 0; // Reset for next berry in chain
+                    p.settleTimer = 0; 
                 }
             }
         } else {
-            // Reset combo if in air or no berries
             if (!p.grounded && p.followingBerries.length === 0) {
                  p.settleStreak = 0;
                  p.settleTimer = 0;
             }
         }
 
-        // Squash/Stretch Recovery
         p.sx += (1 - p.sx) * 15 * dt;
         p.sy += (1 - p.sy) * 15 * dt;
         
-        // History for Berry Follow
         p.history.unshift({ x: p.x, y: p.y });
         if (p.history.length > 300) p.history.length = 300;
         
-        // Procedural Generation
         while (this.spawnY > this.cameraY - 200) this.generateMap();
         
-        // Cleanup
         const dl = this.cameraY + this.viewHeight + 100;
         this.platforms = this.platforms.filter(o => o.y < dl);
         this.solids = this.solids.filter(o => o.y < dl);
@@ -829,7 +795,6 @@ export class GameEngine {
     updatePhysicsSubStep(dt: number, input: { dir: number, jump: boolean, dash: boolean }) {
         const p = this.player;
 
-        // 1. Wall Bounce / Dash Start Logic (Priority)
         if (p.jumpBuffer > 0 && p.wallBounceTimer > 0) {
             let wbDir = 0;
             const checkRect = { x: p.x - 12, y: p.y, w: p.w + 24, h: p.h };
@@ -843,13 +808,12 @@ export class GameEngine {
                 p.jumpBuffer = 0; p.wallBounceTimer = 0; p.isDashing = false; p.dashTimer = 0;
                 p.vy = -950; p.vx = -wbDir * WALL_JUMP_X; 
                 p.wallJumpTimer = 0.2; p.sx = 0.5; p.sy = 1.5;
-                p.flashTimer = 0.1; // Flash
+                p.flashTimer = 0.1; 
                 sfx.play('bounce'); this.spawnRipple(p.x + p.w / 2, p.y + p.h / 2);
-                return; // Skip rest of physics this step
+                return; 
             }
         }
 
-        // Dash Trigger: Either direct input OR buffered input
         if (input.dash && p.canDash && !p.isDashing) {
             let dx = 0; let dy = -1;
             if (input.dir !== 0) { dx = input.dir * 0.707; dy = -0.707; }
@@ -858,17 +822,16 @@ export class GameEngine {
             p.vx = dx * DASH_SPEED; p.vy = dy * DASH_SPEED;
             this.hitStop = 0.05; p.dashDx = dx; p.dashDy = dy;
             p.sx = 0.6; p.sy = 1.4; sfx.play('dash'); this.shake = 6;
-            p.dashBuffer = 0; // Consume buffer
+            this.vibrate(15); // Haptic
+            p.dashBuffer = 0; 
         }
 
-        // 2. Velocity Calculation
         if (p.isDashing) {
             p.dashTimer -= dt;
             if (p.dashTimer <= 0) {
                 p.isDashing = false; p.vx *= 0.5; p.vy *= 0.5;
             }
         } else {
-            // Normal movement
             let inputX = input.dir;
             if (p.wallJumpTimer > 0) inputX = 0;
             if (inputX !== 0) p.faceDir = inputX;
@@ -879,7 +842,6 @@ export class GameEngine {
             p.vy += GRAVITY * dt;
         }
 
-        // 3. Wall Slide & Jump
         if (!p.isDashing) {
             p.onWall = 0;
             if (this.checkWallOverlap(-2)) p.onWall = -1;
@@ -893,11 +855,9 @@ export class GameEngine {
 
             if (p.jumpBuffer > 0) {
                 if (p.grounded || p.coyoteTimer > 0) {
-                    // Ground Jump
                     p.vy = JUMP_FORCE; p.grounded = false; p.coyoteTimer = 0; p.jumpBuffer = 0;
                     p.sx = 0.6; p.sy = 1.4; sfx.play('jump');
                 } else if (p.onWall !== 0) {
-                    // Wall Jump
                     p.vy = WALL_JUMP_Y; p.vx = -p.onWall * WALL_JUMP_X;
                     if (input.dir === p.onWall || input.dir === 0) p.wallJumpTimer = 0.15; else p.wallJumpTimer = 0;
                     p.jumpBuffer = 0; p.onWall = 0; sfx.play('jump');
@@ -906,43 +866,33 @@ export class GameEngine {
             }
         }
 
-        // 4. X Movement & Collision
         p.x += p.vx * dt;
         this.resolveSolidsX();
-        this.checkBounds(); // Ensure inside screen horizontally
+        this.checkBounds(); 
 
-        // 5. Y Movement & Collision (With Corner Correction)
         p.y += p.vy * dt;
-        p.grounded = false; // Assume air unless we hit something
+        p.grounded = false; 
         
-        // Platform (One-way) collision
         if (!p.isDashing && p.vy > 0) {
             this.checkPlatformCollisions();
         }
 
-        // Solid Y Collision + Corner Correction
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         for (const s of this.solids) {
             if (this.AABB(rect, s)) {
-                // Corner Correction Check
                 const overlapLeft = (p.x + p.w) - s.x;
                 const overlapRight = (s.x + s.w) - p.x;
                 
-                // If barely clipping an edge, push OUT instead of stopping Y
                 if (overlapLeft < 10) {
-                    p.x = s.x - p.w - 0.1; // Push Left
-                    // Don't stop Y, just correct X and continue
+                    p.x = s.x - p.w - 0.1; 
                 } else if (overlapRight < 10) {
-                    p.x = s.x + s.w + 0.1; // Push Right
+                    p.x = s.x + s.w + 0.1; 
                 } else {
-                    // Full Y Collision
                     if (p.vy > 0) {
-                        // Landed
                         p.y = s.y - p.h;
                         p.vy = 0;
                         p.grounded = true;
                     } else if (p.vy < 0) {
-                        // Bonked Head
                         p.y = s.y + s.h;
                         p.vy = 0;
                     }
@@ -950,374 +900,211 @@ export class GameEngine {
             }
         }
 
-        // 6. State Updates
         if (p.grounded) {
             p.canDash = true; 
-            // Note: Settle Timer for berries is handled in main loop to allow consistent timing
         }
     }
 
-    checkWallOverlap(ox: number) {
+    checkWallOverlap(offset: number) {
         const p = this.player;
-        const check = { x: p.x + ox, y: p.y + 4, w: p.w, h: p.h - 8 };
-        for(const s of this.solids) if(this.AABB(check, s)) return true;
+        const rect = { x: p.x + offset, y: p.y, w: p.w, h: p.h };
+        for (const s of this.solids) {
+            if (this.AABB(rect, s)) return true;
+        }
         return false;
     }
 
     die() {
+        if (this.state === GameState.DYING) return;
         this.state = GameState.DYING;
-        sfx.play('death');
-        const p = this.player;
-        
-        // Init Ripple
         this.deathRipple.active = true;
-        this.deathRipple.x = p.x + p.w / 2;
-        this.deathRipple.y = p.y + p.h / 2;
-        if (this.deathRipple.y > this.cameraY + this.viewHeight) {
-            this.deathRipple.y = this.cameraY + this.viewHeight;
-        }
+        this.deathRipple.x = this.player.x + this.player.w / 2;
+        this.deathRipple.y = this.player.y + this.player.h / 2;
         this.deathRipple.r = 0;
         this.deathRipple.maxR = Math.max(VIEW_WIDTH, this.viewHeight) * 1.5;
-        this.deathRipple.color = p.canDash ? COLORS.hairIdle : COLORS.hairNoDash;
-
-        if (p.highestY > this.highScore) {
-            this.highScore = p.highestY;
-            localStorage.setItem('dc_highscore', this.highScore.toString());
-        }
+        sfx.play('death');
+        this.vibrate(200);
     }
 
     draw() {
         if (!this.ctx) return;
         const ctx = this.ctx;
-        const p = this.player;
-        const camY = Math.floor(this.cameraY); // integer camera
-
-        // --- DRAW BACKGROUND ---
-        ctx.save();
-        if (this.bgImg && this.bgImg.complete && this.bgImg.naturalWidth > 0) {
-            // Parallax factor (e.g. 0.5 speed)
-            const py = -camY * 0.1; 
-            // Tile vertical if needed
-            const bgH = 960;
-            const y1 = (py % bgH) - bgH;
-            const y2 = (py % bgH);
-            const y3 = (py % bgH) + bgH;
-            
-            // Draw 3 copies to cover viewport loop
-            ctx.drawImage(this.bgImg, 0, Math.floor(y1));
-            ctx.drawImage(this.bgImg, 0, Math.floor(y2));
-            ctx.drawImage(this.bgImg, 0, Math.floor(y3));
-        } else {
-            ctx.fillStyle = '#1d1d2b';
-            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        }
-        ctx.restore();
-
-        // Snow (Background layer) - clean pixel squares
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        this.snow.forEach(s => {
-            ctx.fillRect(Math.floor(s.x), Math.floor(s.y), Math.floor(s.size), Math.floor(s.size));
-        });
-
-        // Special Rendering for Death
-        if (this.state === GameState.DYING) {
-            ctx.save();
-            ctx.translate(0, -camY);
-            // Draw world elements behind ripple
-            this.platforms.forEach(pl => {
-                if (this.platformImg && this.platformImg.complete && this.platformImg.naturalWidth > 0) {
-                    for(let x = pl.x; x < pl.x + pl.w; x += TILE_SIZE) {
-                        ctx.drawImage(this.platformImg, Math.floor(x), Math.floor(pl.y));
-                    }
-                } else {
-                    ctx.fillStyle = COLORS.rock;
-                    ctx.fillRect(Math.floor(pl.x), Math.floor(pl.y), pl.w, pl.h);
-                }
-            });
-            this.solids.forEach(s => {
-               // Fallback if textures missing during death to maintain consistent look
-               ctx.fillStyle = '#201c3b';
-               ctx.fillRect(s.x, s.y, s.w, s.h);
-            });
-            ctx.restore();
-
-            // Ripple
-            if (this.deathRipple.active) {
-                ctx.save();
-                ctx.fillStyle = this.deathRipple.color;
-                ctx.beginPath();
-                ctx.arc(Math.floor(this.deathRipple.x), Math.floor(this.deathRipple.y - camY), Math.floor(this.deathRipple.r), 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            }
-            return;
-        }
-
+        
+        // Background
+        ctx.fillStyle = `rgb(${this.currentBg.join(',')})`;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
         ctx.save();
         
-        // Screen Shake
+        // Camera Shake
         let sx = 0, sy = 0;
         if (this.shake > 0) {
-            sx = Math.floor((Math.random() - 0.5) * this.shake);
-            sy = Math.floor((Math.random() - 0.5) * this.shake);
-            this.shake *= 0.9;
-            if (this.shake < 0.5) this.shake = 0;
+            sx = (Math.random() - 0.5) * this.shake;
+            sy = (Math.random() - 0.5) * this.shake;
+            this.shake -= 0.5;
+            if(this.shake < 0) this.shake = 0;
         }
-        ctx.translate(sx, -camY + sy);
+        ctx.translate(sx, -this.cameraY + sy);
 
-        // Best Score Line
-        if (this.highScore > 0) {
-            const hy = -this.highScore * 10;
-            ctx.strokeStyle = '#ffd700';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([10, 10]);
-            ctx.beginPath();
-            ctx.moveTo(0, Math.floor(hy));
-            ctx.lineTo(VIEW_WIDTH, Math.floor(hy));
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.fillStyle = '#ffd700';
-            ctx.font = 'bold 16px monospace';
-            ctx.fillText(`BEST: ${this.highScore}m`, 10, Math.floor(hy - 10));
-        }
-
-        // Draw Platforms (Bridge)
-        this.platforms.forEach(pl => {
-            if (this.platformImg && this.platformImg.complete && this.platformImg.naturalWidth > 0) {
-                for(let x = pl.x; x < pl.x + pl.w; x += TILE_SIZE) {
-                    // Draw Bridge Segment
-                    ctx.drawImage(this.platformImg, Math.floor(x), Math.floor(pl.y));
-                }
-            } else {
-                ctx.fillStyle = COLORS.rock;
-                ctx.fillRect(Math.floor(pl.x), Math.floor(pl.y), pl.w, pl.h);
-            }
+        // Snow
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        this.snow.forEach(s => {
+            ctx.fillRect(s.x, s.y, s.size, s.size);
         });
 
-        // --- DRAW SOLIDS WITH AUTO-TILING ---
-        if (this.tilesetImg && this.tilesetImg.complete && this.tilesetImg.naturalWidth > 0) {
-            const TS = TILE_SIZE; // 24
-            
-            for(const s of this.solids) {
-                // Iterate over every 24x24 chunk in this solid
-                for(let x = s.x; x < s.x + s.w; x += TS) {
-                    for(let y = s.y; y < s.y + s.h; y += TS) {
-                        
-                        // Neighbor Checks (Is there a solid adjancent?)
-                        const u = this.isSolidAt(x, y - TS);
-                        const d = this.isSolidAt(x, y + TS);
-                        const l = this.isSolidAt(x - TS, y);
-                        const r = this.isSolidAt(x + TS, y);
-                        
-                        // Determine Source X (Horizontal State)
-                        let srcX = 24; // Center by default
-                        if (!l && r) srcX = 0;       // Left Edge
-                        else if (l && !r) srcX = 48; // Right Edge
-                        else if (!l && !r) srcX = 72; // Single Column
-                        
-                        // Determine Source Y (Vertical State)
-                        let srcY = 24; // Middle by default
-                        if (!u) srcY = 0;       // Top (Snow)
-                        else if (!d) srcY = 48; // Bottom
-                        
-                        ctx.drawImage(
-                            this.tilesetImg, 
-                            srcX, srcY, TS, TS, 
-                            Math.floor(x), Math.floor(y), TS, TS
-                        );
-                    }
-                }
-            }
-        } else {
-             // Fallback (Improved Color)
-             this.solids.forEach(s => {
-                ctx.fillStyle = '#201c3b'; // Deep Purple base color
-                ctx.fillRect(Math.floor(s.x), Math.floor(s.y), s.w, s.h);
-                // Simple border fallback
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = '#68c2d3';
-                ctx.strokeRect(Math.floor(s.x), Math.floor(s.y), s.w, s.h);
-             });
+        // Solids
+        ctx.fillStyle = COLORS.rock;
+        for (const s of this.solids) {
+            ctx.fillRect(s.x, s.y, s.w, s.h);
+            // Snow top decoration
+            ctx.fillStyle = COLORS.snow;
+            ctx.fillRect(s.x, s.y, s.w, 4);
+            ctx.fillStyle = COLORS.rock;
         }
 
-        // Draw Springs
-        if (this.springImg && this.springImg.complete && this.springImg.naturalWidth > 0) {
-            this.springs.forEach(s => {
+        // Platforms
+        for (const pl of this.platforms) {
+            if (this.platformImg) {
+                // Tiling
+                const tileW = 24;
+                const count = Math.ceil(pl.w / tileW);
+                for(let i=0; i<count; i++) {
+                     let dw = (i === count - 1) ? (pl.w - i * tileW) : tileW;
+                     ctx.drawImage(this.platformImg, 0, 0, dw, 14, pl.x + i * tileW, pl.y, dw, 14);
+                }
+            } else {
+                ctx.fillStyle = '#5c4436';
+                ctx.fillRect(pl.x, pl.y, pl.w, 14);
+            }
+        }
+
+        // Springs
+        for (const s of this.springs) {
+            if (this.springImg) {
                 ctx.save();
                 ctx.translate(s.x + s.w/2, s.y + s.h/2);
+                if (s.dir === 'left') ctx.rotate(Math.PI/2);
+                if (s.dir === 'right') ctx.rotate(-Math.PI/2);
                 
-                // Rotation based on direction
-                if (s.dir === 'left') ctx.rotate(Math.PI / 2);
-                else if (s.dir === 'right') ctx.rotate(-Math.PI / 2);
+                let scaleY = 1 + (s.animTimer > 0 ? Math.sin(s.animTimer * 20) * 0.5 : 0);
+                let scaleX = 1 - (s.animTimer > 0 ? Math.sin(s.animTimer * 20) * 0.2 : 0);
                 
-                // Animation Scale ("Boing" effect)
-                let scaleY = 1;
-                if (s.animTimer > 0) {
-                    // Simple bounce curve: Expand -> Contract
-                    const t = 1 - (s.animTimer / 0.2); // 0 to 1
-                    scaleY = 1 + Math.sin(t * Math.PI) * 0.5;
-                }
-                ctx.scale(1, scaleY);
-                
-                ctx.drawImage(this.springImg!, -12, -12); // Centered
+                ctx.scale(scaleX, scaleY);
+                ctx.drawImage(this.springImg, -12, -12, 24, 24);
                 ctx.restore();
-            });
-        } else {
-            // Fallback spring
-            this.springs.forEach(s => {
-                ctx.fillStyle = '#e04040';
-                ctx.fillRect(s.x, s.y, s.w, s.h);
-            });
+            }
         }
 
         // Crystals
-        this.crystals.forEach(c => {
-            const cx = Math.floor(c.x + 15);
-            const cy = Math.floor(c.y);
-            if (c.respawnTimer <= 0) {
-                const h = Math.sin(Date.now() / 200) * 4;
-                ctx.fillStyle = COLORS.crystal;
-                ctx.beginPath();
-                ctx.moveTo(cx, cy + h);
-                ctx.lineTo(cx + 12, cy + 16 + h);
-                ctx.lineTo(cx, cy + 32 + h);
-                ctx.lineTo(cx - 12, cy + 16 + h);
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(0,255,100,0.4)';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-            } else {
-                ctx.strokeStyle = '#555';
-                ctx.setLineDash([2, 2]);
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(cx, cy);
-                ctx.lineTo(cx + 12, cy + 16);
-                ctx.lineTo(cx, cy + 32);
-                ctx.lineTo(cx - 12, cy + 16);
-                ctx.closePath();
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-        });
-
-        // Berries
-        this.berries.forEach(b => {
-            if (b.state !== 2) {
-                const by = b.state === 0 ? b.baseY + Math.sin(Date.now() / 200) * 5 : b.y;
-                ctx.globalAlpha = b.state === 1 ? 0.8 : 1;
-                ctx.fillStyle = COLORS.berry;
-                ctx.beginPath();
-                ctx.arc(Math.floor(b.x + 15), Math.floor(by + 15), 10, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = '#00e436';
-                ctx.beginPath();
-                ctx.moveTo(Math.floor(b.x + 9), Math.floor(by + 11));
-                ctx.lineTo(Math.floor(b.x + 15), Math.floor(by + 6));
-                ctx.lineTo(Math.floor(b.x + 21), Math.floor(by + 11));
-                ctx.lineTo(Math.floor(b.x + 15), Math.floor(by + 15));
-                ctx.fill();
-                ctx.globalAlpha = 1;
-            }
-        });
-
-        // Particles
-        this.particles.forEach(pt => {
-            ctx.fillStyle = pt.color;
-            ctx.globalAlpha = pt.life;
-            ctx.fillRect(Math.floor(pt.x), Math.floor(pt.y), Math.floor(pt.size), Math.floor(pt.size));
-        });
-        ctx.globalAlpha = 1;
-
-        // Ripples
-        this.ripples.forEach(r => {
-            ctx.beginPath();
-            ctx.arc(Math.floor(r.x), Math.floor(r.y), Math.floor(r.r), 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(255,200,200,${r.alpha})`;
-            ctx.lineWidth = 4;
-            ctx.stroke();
-        });
-
-        // --- PLAYER DRAWING ---
-        p.trail.forEach(t => {
-            ctx.save();
-            ctx.translate(Math.floor(t.x + 12), Math.floor(t.y + 12));
-            if (t.dash) {
-                ctx.rotate(Math.atan2(t.dy, t.dx) + Math.PI / 2);
-                ctx.scale(0.6, 1.6);
-            }
-            ctx.fillStyle = `rgba(255,255,255,${t.alpha})`;
-            ctx.fillRect(-12, -12, 24, 24);
-            ctx.restore();
-            t.alpha -= 0.15;
-        });
-        p.trail = p.trail.filter(t => t.alpha > 0);
-
-        ctx.save();
-        ctx.translate(Math.floor(p.x + 12), Math.floor(p.y + 12));
-        if (p.isDashing) {
-            ctx.rotate(Math.atan2(p.dashDy, p.dashDx) + Math.PI / 2);
-            ctx.scale(0.6, 1.6);
-            if (Math.random() > 0.5) {
-                p.trail.push({ x: p.x, y: p.y, alpha: 0.8, dash: true, dx: p.dashDx, dy: p.dashDy });
-            }
-        } else {
-            ctx.scale(p.sx, p.sy);
-        }
-        
-        // Flash white if dash restored or state refreshed
-        if (p.flashTimer > 0) {
-            ctx.fillStyle = '#ffffff';
-        } else {
-            ctx.fillStyle = p.isDashing ? '#fff' : (p.canDash ? COLORS.hairIdle : COLORS.hairNoDash);
-        }
-        ctx.fillRect(-12, -12, 24, 24);
-        
-        // Eyes
-        if (!p.isDashing) {
-            ctx.fillStyle = '#000';
-            const lx = p.faceDir * 2;
-            ctx.fillRect(-6 + lx, -6, 4, 4);
-            ctx.fillRect(2 + lx, -6, 4, 4);
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(-6 + lx, -6, 1, 1);
-            ctx.fillRect(2 + lx, -6, 1, 1);
-        }
-        ctx.restore();
-
-        // Direction Indicator (Restored & Integer aligned)
-        if (!p.isDashing) {
-            let ang = -Math.PI / 2;
-            if (this.lastInputDir === -1) ang = -Math.PI * 0.75;
-            else if (this.lastInputDir === 1) ang = -Math.PI * 0.25;
+        for (const c of this.crystals) {
+            if (c.respawnTimer > 0) continue;
+            ctx.fillStyle = COLORS.crystal;
+            
+            // Pulse
+            const pulse = Math.sin(Date.now() / 200) * 2;
             
             ctx.save();
-            ctx.translate(Math.floor(p.x + 12), Math.floor(p.y + 12));
-            ctx.translate(Math.floor(Math.cos(ang) * 35), Math.floor(Math.sin(ang) * 35));
-            ctx.rotate(ang + Math.PI / 2);
-            ctx.fillStyle = 'rgba(255,255,255,0.7)';
-            ctx.font = '16px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('▲', 0, 0);
+            ctx.translate(c.x + 15, c.y + 15);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillRect(-7 - pulse/4, -7 - pulse/4, 14 + pulse/2, 14 + pulse/2);
+            ctx.fillStyle = '#fff';
+            ctx.globalAlpha = 0.5;
+            ctx.fillRect(-5, -5, 10, 10);
+            ctx.globalAlpha = 1;
             ctx.restore();
         }
 
-        const screenY = p.y - this.cameraY;
-        if (screenY > this.viewHeight && screenY < this.viewHeight + 150) {
-             ctx.save();
-             ctx.translate(0, camY); // Use camY (integer)
-             const iy = camY + this.viewHeight - 30;
-             const ix = Math.max(20, Math.min(VIEW_WIDTH - 20, p.x + p.w/2));
-             ctx.fillStyle = p.canDash ? COLORS.hairIdle : COLORS.hairNoDash;
-             ctx.beginPath();
-             ctx.moveTo(ix, iy);
-             ctx.lineTo(ix - 10, iy - 15);
-             ctx.lineTo(ix + 10, iy - 15);
-             ctx.fill();
-             ctx.restore();
+        // Berries
+        for (const b of this.berries) {
+            if (b.state === 2) continue;
+            
+            let bx = b.x;
+            let by = b.y;
+            if (b.state === 0) by += Math.sin(Date.now() / 300) * 3;
+            
+            ctx.fillStyle = COLORS.berry;
+            ctx.beginPath();
+            ctx.arc(bx + 15, by + 15, 9, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Wings
+            if (b.state !== 2) {
+                const flap = Math.sin(Date.now() / 100) * 10;
+                ctx.fillStyle = '#fff';
+                
+                // Left Wing
+                ctx.save();
+                ctx.translate(bx + 8, by + 8);
+                ctx.rotate((-20 + flap) * Math.PI / 180);
+                ctx.fillRect(-8, -3, 8, 6);
+                ctx.restore();
+
+                // Right Wing
+                ctx.save();
+                ctx.translate(bx + 22, by + 8);
+                ctx.rotate((20 - flap) * Math.PI / 180);
+                ctx.fillRect(0, -3, 8, 6);
+                ctx.restore();
+            }
+        }
+
+        // Particles
+        for (const pt of this.particles) {
+            ctx.fillStyle = pt.color;
+            ctx.globalAlpha = Math.min(1, pt.life);
+            ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
+            ctx.globalAlpha = 1;
+        }
+
+        // Player
+        if (this.state !== GameState.DYING) {
+            const p = this.player;
+            ctx.save();
+            ctx.translate(p.x + p.w/2, p.y + p.h/2);
+            ctx.scale(p.sx * p.faceDir, p.sy);
+            
+            // Body
+            const hairColor = p.canDash ? (p.isDashing ? COLORS.hairDash : COLORS.hairIdle) : COLORS.hairNoDash;
+            ctx.fillStyle = (p.flashTimer > 0 && Math.floor(Date.now() / 50) % 2) ? '#fff' : hairColor;
+            ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+            
+            // Eyes
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(2, -6, 5, 5);
+            ctx.fillRect(8, -6, 5, 5);
+            
+            ctx.fillStyle = '#000';
+            ctx.fillRect(4, -4, 2, 2);
+            ctx.fillRect(10, -4, 2, 2);
+            
+            ctx.restore();
+        }
+
+        // Ripples
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        for (const r of this.ripples) {
+            ctx.globalAlpha = r.alpha;
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
+
+        // Death Wipe
+        if (this.state === GameState.DYING && this.deathRipple.active) {
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(this.deathRipple.x, this.deathRipple.y, this.deathRipple.r, 0, Math.PI * 2);
+            ctx.fill();
         }
 
         ctx.restore();
+        
+        // Flash Overlay
+        if (this.hitStop > 0 && this.state !== GameState.DYING) {
+             ctx.fillStyle = 'rgba(255,255,255,0.2)';
+             ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
     }
 }

@@ -155,7 +155,7 @@ const App = () => {
 
   // Touch Controls
   const handleTouchStart = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
-    e.preventDefault();
+    // e.preventDefault(); // Handled by CSS touch-action
     if (action === 'left') inputRef.current.dir = -1;
     if (action === 'right') inputRef.current.dir = 1;
     if (action === 'jump') { inputRef.current.jump = true; inputRef.current.jumpHeld = true; }
@@ -163,7 +163,6 @@ const App = () => {
   };
 
   const handleTouchEnd = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
-    e.preventDefault();
     if (action === 'left' && inputRef.current.dir === -1) inputRef.current.dir = 0;
     if (action === 'right' && inputRef.current.dir === 1) inputRef.current.dir = 0;
     if (action === 'jump') inputRef.current.jumpHeld = false;
@@ -218,7 +217,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_25</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_26</div>
           </div>
         )}
 
@@ -258,10 +257,13 @@ const App = () => {
         )}
 
         {/* Mobile Controls Overlay - Changed md:hidden to lg:hidden to show on tablets/large phones */}
-        <div className="absolute inset-0 pointer-events-none z-40 lg:hidden flex flex-col justify-end pb-8 px-4">
+        <div 
+          className="absolute inset-0 pointer-events-none z-40 lg:hidden flex flex-col justify-end pb-16 px-4"
+          onContextMenu={(e) => e.preventDefault()} // Prevent long-press menu
+        >
             <div className="flex justify-between w-full items-end">
               {/* D-Pad Area */}
-              <div className="flex gap-4 pointer-events-auto">
+              <div className="flex gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
                    className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
                    onTouchStart={handleTouchStart('left')} onTouchEnd={handleTouchEnd('left')}
@@ -277,9 +279,9 @@ const App = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-col gap-4 pointer-events-auto">
+              <div className="flex flex-col gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className="w-20 h-20 bg-indigo-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+                   className="w-20 h-20 bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
                    onTouchStart={handleTouchStart('jump')} onTouchEnd={handleTouchEnd('jump')}
                  >
                     <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
