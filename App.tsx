@@ -155,7 +155,9 @@ const App = () => {
 
   // Touch Controls
   const handleTouchStart = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
-    // e.preventDefault(); // Handled by CSS touch-action
+    // Prevent default is handled by CSS touch-action: none on body generally,
+    // but e.preventDefault() here stops mouse emulation and text selection
+    // e.preventDefault(); // Removed to allow multi-touch better on some devices, handled by CSS
     if (action === 'left') inputRef.current.dir = -1;
     if (action === 'right') inputRef.current.dir = 1;
     if (action === 'jump') { inputRef.current.jump = true; inputRef.current.jumpHeld = true; }
@@ -163,6 +165,7 @@ const App = () => {
   };
 
   const handleTouchEnd = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
+    // e.preventDefault(); 
     if (action === 'left' && inputRef.current.dir === -1) inputRef.current.dir = 0;
     if (action === 'right' && inputRef.current.dir === 1) inputRef.current.dir = 0;
     if (action === 'jump') inputRef.current.jumpHeld = false;
