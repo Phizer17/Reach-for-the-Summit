@@ -15,11 +15,11 @@ export const MAX_SPEED = 320;
 export const ACCEL_TIME = 0.096; // 96ms to max speed
 export const DECEL_TIME = 0.048; // 48ms to stop
 
-export const DASH_SPEED = 750;
+export const DASH_SPEED = 1050; // Snappier dash
 export const WALL_SLIDE_SPEED = 150;
-export const WALL_JUMP_X = 440;
+export const WALL_JUMP_X = 650; // Increased to 650 (approx 2.5 tiles with drag)
 export const WALL_JUMP_Y = -750; // Slightly higher to match new gravity
-export const DASH_TIME = 0.14;
+export const DASH_TIME = 0.10; // Reduced duration to maintain ~105px distance
 
 export const SPRING_SPEED_Y = -1350; // Increased to compensate for higher gravity (was -1050)
 export const SPRING_SPEED_X = 1200;

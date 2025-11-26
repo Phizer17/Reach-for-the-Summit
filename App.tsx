@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GameEngine } from './game/GameEngine';
 import { GameState } from './types';
@@ -27,6 +26,10 @@ const App = () => {
   const [activeAction, setActiveAction] = useState<{jump: boolean, dash: boolean, left: boolean, right: boolean}>({ jump: false, dash: false, left: false, right: false });
 
   const [highScore, setHighScore] = useState(0);
+
+  // Use a Ref to track gameState for event listeners to avoid stale closures and re-binding issues
+  const gameStateRef = useRef(GameState.TITLE);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
 
   // Callbacks Ref to hold fresh instances of handlers without re-triggering effects
   const callbacksRef = useRef({
@@ -60,8 +63,7 @@ const App = () => {
     setHudBerries(b);
     setIsRecordRun(isRecord);
     
-    // Only update timer if the game is actively running (GameEngine handles this check too, but double safety)
-    if (gameState === GameState.PLAYING) {
+    if (gameStateRef.current === GameState.PLAYING) {
       setHudTimer(formatTime(time));
     }
     
@@ -70,7 +72,7 @@ const App = () => {
          setTimeout(() => setBerryPop(false), 100);
     }
     setPendingBerries(pb);
-  }, [hudBerries, pendingBerries, gameState]);
+  }, [hudBerries, pendingBerries]);
 
   const handleGameOver = useCallback((h: number, b: number, newRecord: boolean, time: number) => {
     let rank = "C";
@@ -95,7 +97,7 @@ const App = () => {
     }, 2500);
   }, []);
 
-  // Update callbacks ref on every render so GameEngine calls the latest logic
+  // Update callbacks ref
   useEffect(() => {
     callbacksRef.current.onScoreUpdate = handleScoreUpdate;
     callbacksRef.current.onGameOver = handleGameOver;
@@ -124,12 +126,53 @@ const App = () => {
     requestRef.current = requestAnimationFrame(animate);
   };
 
+  const togglePause = useCallback(() => {
+    if (!engineRef.current) return;
+    
+    // Use ref to get current state immediately
+    const current = gameStateRef.current;
+    
+    if (current === GameState.PLAYING) {
+        setGameState(GameState.PAUSED);
+        engineRef.current.state = GameState.PAUSED;
+    } else if (current === GameState.PAUSED) {
+        setGameState(GameState.PLAYING);
+        engineRef.current.state = GameState.PLAYING;
+    }
+  }, []);
+
+  const resumeGame = () => {
+      if (engineRef.current) engineRef.current.state = GameState.PLAYING;
+      setGameState(GameState.PLAYING);
+  };
+
+  const startGame = () => {
+    sfx.init();
+    if (engineRef.current) {
+      engineRef.current.initGame();
+      setGameState(GameState.PLAYING);
+      setHudTimer("00:00.00");
+    }
+  };
+
+  const toTitle = () => {
+    sfx.init();
+    if (engineRef.current) {
+        engineRef.current.state = GameState.TITLE;
+        engineRef.current.deathRipple.active = false; 
+    }
+    setGameState(GameState.TITLE);
+    const saved = localStorage.getItem('dc_highscore');
+    if (saved) setHighScore(parseInt(saved));
+    setIsRecordRun(false);
+  };
+
+  // One-time Engine Initialization
   useEffect(() => {
     const saved = localStorage.getItem('dc_highscore');
     if (saved) setHighScore(parseInt(saved));
 
-    if (canvasRef.current) {
-      // Initialize GameEngine with proxy functions that delegate to the ref
+    if (canvasRef.current && !engineRef.current) {
       engineRef.current = new GameEngine(
           canvasRef.current,
           (h, b, r, t, pb) => callbacksRef.current.onScoreUpdate(h, b, r, t, pb),
@@ -139,8 +182,22 @@ const App = () => {
       requestRef.current = requestAnimationFrame(animate);
     }
 
+    return () => {
+      cancelAnimationFrame(requestRef.current);
+    };
+  }, []);
+
+  // Event Listeners (using refs for stable access)
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
+      if (k === 'escape') {
+          togglePause();
+          return;
+      }
+      
+      if (engineRef.current?.state === GameState.PAUSED) return;
+
       if (['a', 'arrowleft'].includes(k)) {
           inputRef.current.dir = -1;
           setActiveAction(prev => ({...prev, left: true}));
@@ -167,6 +224,7 @@ const App = () => {
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
+      
       if (['a', 'arrowleft'].includes(k)) {
           if (inputRef.current.dir === -1) inputRef.current.dir = 0;
           setActiveAction(prev => ({...prev, left: false}));
@@ -192,32 +250,11 @@ const App = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      cancelAnimationFrame(requestRef.current);
     };
-  }, []); // Empty dependency array ensures GameEngine is created ONLY ONCE on mount
-
-  const startGame = () => {
-    sfx.init();
-    if (engineRef.current) {
-      engineRef.current.initGame();
-      setGameState(GameState.PLAYING);
-      setHudTimer("00:00.00"); // Reset HUD timer on start
-    }
-  };
-
-  const toTitle = () => {
-    sfx.init();
-    if (engineRef.current) {
-        engineRef.current.state = GameState.TITLE;
-        engineRef.current.deathRipple.active = false; 
-    }
-    setGameState(GameState.TITLE);
-    const saved = localStorage.getItem('dc_highscore');
-    if (saved) setHighScore(parseInt(saved));
-    setIsRecordRun(false);
-  };
+  }, [togglePause]);
 
   const handleTouchStart = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
+    if (gameStateRef.current === GameState.PAUSED) return;
     if (action === 'left') { inputRef.current.dir = -1; setActiveAction(prev => ({...prev, left: true})); }
     if (action === 'right') { inputRef.current.dir = 1; setActiveAction(prev => ({...prev, right: true})); }
     if (action === 'jump') { 
@@ -256,29 +293,43 @@ const App = () => {
 
         {/* HUD */}
         <div className="absolute top-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col gap-2">
-           {/* Timer */}
-           <div className={`font-mono text-2xl font-bold drop-shadow-md ${gameState === GameState.GAMEOVER ? 'text-gray-500' : 'text-gray-300'}`}>{hudTimer}</div>
-           
-           <div className="flex items-center gap-2">
-              <div className={`bg-black/50 border-2 rounded-full px-4 py-1 flex items-center gap-2 transition-colors duration-300 ${
-                  isRecordRun ? 'border-yellow-400 text-yellow-300 shadow-[0_0_10px_rgba(255,215,0,0.5)]' : 'border-white/20 text-white'
-              }`}>
-                 <span>▲</span> <span>{hudHeight}m</span>
-              </div>
-           </div>
-           <div className="flex items-center gap-2 relative">
-              <div className={`bg-black/50 border-2 border-white/20 rounded-full px-4 py-1 flex items-center gap-2 transition-all duration-150 ${
-                  scorePop ? 'scale-125 bg-red-500/20 border-red-400' : ''
-              }`}>
-                 <span>🍓</span> <span className="text-white">{hudBerries}</span>
-              </div>
-              {pendingBerries > 0 && (
-                  <div className={`absolute -top-2 left-16 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full transition-transform ${
-                      berryPop ? 'scale-150' : 'scale-100'
-                  }`}>
-                      +{pendingBerries}
-                  </div>
-              )}
+           <div className="flex justify-between items-start">
+               <div>
+                   {/* Timer */}
+                   <div className={`font-mono text-2xl font-bold drop-shadow-md ${gameState === GameState.GAMEOVER ? 'text-gray-500' : 'text-gray-300'}`}>{hudTimer}</div>
+                   
+                   <div className="flex items-center gap-2 mt-1">
+                      <div className={`bg-black/50 border-2 rounded-full px-4 py-1 flex items-center gap-2 transition-colors duration-300 ${
+                          isRecordRun ? 'border-yellow-400 text-yellow-300 shadow-[0_0_10px_rgba(255,215,0,0.5)]' : 'border-white/20 text-white'
+                      }`}>
+                         <span>▲</span> <span>{hudHeight}m</span>
+                      </div>
+                   </div>
+                   <div className="flex items-center gap-2 relative mt-1">
+                      <div className={`bg-black/50 border-2 border-white/20 rounded-full px-4 py-1 flex items-center gap-2 transition-all duration-150 ${
+                          scorePop ? 'scale-125 bg-red-500/20 border-red-400' : ''
+                      }`}>
+                         <span>🍓</span> <span className="text-white">{hudBerries}</span>
+                      </div>
+                      {pendingBerries > 0 && (
+                          <div className={`absolute -top-2 left-16 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full transition-transform ${
+                              berryPop ? 'scale-150' : 'scale-100'
+                          }`}>
+                              +{pendingBerries}
+                          </div>
+                      )}
+                   </div>
+               </div>
+               
+               {/* Pause Button (Visible only when playing) */}
+               {gameState === GameState.PLAYING && (
+                   <button 
+                       onClick={togglePause}
+                       className="pointer-events-auto bg-black/40 hover:bg-black/60 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm transition-all"
+                   >
+                       <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                   </button>
+               )}
            </div>
         </div>
 
@@ -309,7 +360,34 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_34_fix4</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_36_stable</div>
+          </div>
+        )}
+
+        {/* Pause Menu */}
+        {gameState === GameState.PAUSED && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center p-8 z-50 animate-fade-in-up">
+             <h2 className="text-4xl font-bold text-white mb-8 tracking-widest">PAUSED</h2>
+             <div className="flex flex-col gap-4 w-full max-w-xs">
+                 <button 
+                    onClick={resumeGame}
+                    className="w-full py-4 bg-sky-600 hover:bg-sky-500 active:translate-y-1 border-b-4 border-sky-800 rounded-xl font-bold text-lg transition-all"
+                 >
+                    RESUME
+                 </button>
+                 <button 
+                    onClick={startGame}
+                    className="w-full py-4 bg-red-600 hover:bg-red-500 active:translate-y-1 border-b-4 border-red-800 rounded-xl font-bold text-lg transition-all"
+                 >
+                    RETRY
+                 </button>
+                 <button 
+                    onClick={toTitle}
+                    className="w-full py-4 bg-gray-700 hover:bg-gray-600 active:translate-y-1 border-b-4 border-gray-900 rounded-xl font-bold text-lg transition-all"
+                 >
+                    HOME
+                 </button>
+             </div>
           </div>
         )}
 

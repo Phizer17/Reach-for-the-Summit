@@ -2,6 +2,7 @@
 export enum GameState {
   TITLE = 'TITLE',
   PLAYING = 'PLAYING',
+  PAUSED = 'PAUSED',
   DYING = 'DYING',
   GAMEOVER = 'GAMEOVER'
 }
@@ -44,8 +45,8 @@ export interface PlayerState extends Rect {
   trail: TrailPoint[]; 
   flashTimer: number; 
   dashBuffer: number; 
-  blinkTimer: number; // New: Eye blink timer
-  moveTimer: number; // New: For acceleration curve (96ms)
+  blinkTimer: number; 
+  moveTimer: number; 
 }
 
 export interface Platform extends Rect {}

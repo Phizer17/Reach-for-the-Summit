@@ -226,22 +226,27 @@ export class GameEngine {
         
         let minGapTiles = 4 + Math.floor(heightFactor * 2); 
         
-        // Safety cap: Player can jump ~120px + Dash 100px. 
-        // Max gap should not exceed ~200px (approx 8 tiles) to prevent dead ends.
-        let maxGapTiles = Math.min(8, 7 + Math.floor(heightFactor * 3)); 
+        // Safety cap: Player can jump ~120px + Dash ~105px = 225px.
+        // 9 tiles = 216px. Limit to 9 to be safe.
+        let maxGapTiles = Math.min(9, 7 + Math.floor(heightFactor * 3)); 
         
         let gapTiles = Math.floor(minGapTiles + Math.random() * (maxGapTiles - minGapTiles));
         let baseGap = gapTiles * TILE_SIZE;
 
         const potentialY = this.spawnY - baseGap;
+        // Avoid placing solid immediately above another solid with tiny gap
         if (Math.abs(potentialY - this.lastSolidY) < TILE_SIZE * 3) {
             baseGap += TILE_SIZE * 2; 
         }
 
+        // Special handling for post-spring or post-crystal to prevent unfair gaps
         if (this.lastWasSpringUp) {
+            // After spring up, give some air, but ensure next platform is reachable
+            // Spring jump is high, but we don't want to overdo it.
             baseGap = 200 + Math.random() * 50;
         } else if (this.lastWasCrystal) {
-            if (baseGap > 140) baseGap = 100 + Math.random() * 30;
+            // After crystal, user has dash, but gap shouldn't be insane.
+            if (baseGap > 180) baseGap = 120 + Math.random() * 40;
         }
         
         this.lastWasCrystal = false;
@@ -250,6 +255,7 @@ export class GameEngine {
         this.spawnY -= baseGap;
         const currentY = this.spawnY;
         
+        // --- 1. Crystal Generation ---
         let cChance = 0.1;
         if (Math.random() < cChance) {
             const maxCol = Math.floor((VIEW_WIDTH - 48) / TILE_SIZE);
@@ -262,6 +268,7 @@ export class GameEngine {
             }
         }
 
+        // --- 2. Solid Block Generation ---
         let solidChance = 0.75;
         
         if (Math.random() < solidChance) {
@@ -281,6 +288,7 @@ export class GameEngine {
             this.solids.push({ x, y: currentY - hS, w, h: hS });
             this.lastSolidY = currentY - hS;
             
+            // Berry on Solid
             if (Math.random() > 0.6) {
                 const berryX = x + (Math.random() > 0.5 ? -40 : w + 10);
                 const berryY = currentY - hS - 20 - Math.random() * 40; 
@@ -289,6 +297,7 @@ export class GameEngine {
                 }
             }
 
+            // Attached Blocks (L-shapes)
             const growthSteps = Math.floor(Math.random() * 3);
             for(let i=0; i<growthSteps; i++) {
                 const side = Math.random() > 0.5 ? 1 : -1;
@@ -303,8 +312,10 @@ export class GameEngine {
                 }
             }
 
+            // Springs on Solids
             if (Math.random() < 0.15) {
                 const springX = x + Math.floor(Math.random() * wTiles) * TILE_SIZE;
+                // Ensure clear space above
                 if (!this.isSolidAt(springX - TILE_SIZE, currentY - hS - TILE_SIZE) && 
                     !this.isSolidAt(springX + TILE_SIZE, currentY - hS - TILE_SIZE)) {
                         this.springs.push({
@@ -343,6 +354,7 @@ export class GameEngine {
             return;
         }
 
+        // --- 3. One-way Platform Generation ---
         const wTiles = 3 + Math.floor(Math.random() * 3);
         const wP = wTiles * TILE_SIZE;
         const maxCol = Math.floor((VIEW_WIDTH - wP) / TILE_SIZE);
@@ -502,7 +514,7 @@ export class GameEngine {
                     c.respawnTimer = 2.5;
                     sfx.play('crystal');
                     this.vibrate(50); 
-                    this.hitStop = 0.05;
+                    this.hitStop = 0.12; 
                     this.shake = 4;
                     p.flashTimer = 0.1;
                     this.spawnEffect(c.x + 15, c.y + 15, COLORS.crystal, 5);
@@ -556,6 +568,8 @@ export class GameEngine {
     }
 
     update(dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
+        if (this.state === GameState.PAUSED) return;
+
         for (let i = 0; i < 3; i++) {
             this.currentBg[i] += (this.targetBg[i] - this.currentBg[i]) * 2 * dt;
         }
@@ -612,10 +626,8 @@ export class GameEngine {
         
         if (h > p.highestY) {
             p.highestY = h;
-            // Only update score if not dying
-            if (this.state !== GameState.DYING) {
-                this.onScoreUpdate(h, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
-            }
+            this.onScoreUpdate(h, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
+            
             if (isRecord && !p.hasTriggeredRecord && h < this.highScore + 50) {
                  this.onMilestone("NEW RECORD!!", true);
                  p.hasTriggeredRecord = true;
@@ -626,9 +638,7 @@ export class GameEngine {
                 this.setChapter(p.lastMilestone);
             }
         } else {
-             if (this.state !== GameState.DYING) {
-                this.onScoreUpdate(p.highestY, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
-             }
+             this.onScoreUpdate(p.highestY, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
         }
 
         if (p.y > this.cameraY + this.viewHeight + 100) {
@@ -841,9 +851,7 @@ export class GameEngine {
                 // If changing direction or starting from stop, reset timer
                 if (Math.sign(inputX) !== Math.sign(p.vx) && p.vx !== 0) {
                     p.moveTimer = 0;
-                    p.vx = 0; // Instant turn snap for better feel, or let it slide? 
-                    // Let's reset acceleration curve but keep momentum if needed. 
-                    // To follow the prompt "slow start", we should probably reset timer.
+                    p.vx = 0; 
                 }
                 
                 p.moveTimer += dt;
@@ -854,7 +862,6 @@ export class GameEngine {
                 const targetSpeed = MAX_SPEED * speedFactor * inputX;
                 
                 // Only override velocity if we are "accelerating" up to max speed.
-                // If external forces (springs) pushed us faster, don't clamp instantly.
                 if (Math.abs(p.vx) <= MAX_SPEED) {
                      p.vx = targetSpeed;
                 } else {
@@ -866,13 +873,11 @@ export class GameEngine {
             } else {
                 // Deceleration: Fast then Slow (Exponential Decay)
                 p.moveTimer = 0;
-                // We want to drop from MAX_SPEED to ~0 in DECEL_TIME (48ms)
-                // Using exponential decay: vx *= friction^dt
-                // Let's approximate: reduce to 1% speed in DECEL_TIME
-                // 0.01 = base ^ 0.048 => base = 0.01^(1/0.048) approx 1e-42? No.
-                // Logic: vx = vx * Math.pow(rate, dt);
-                // To effectively stop in 48ms, we need a very strong friction.
-                const stopFriction = Math.pow(0.001, dt / DECEL_TIME); // Reduces to 0.1% in 48ms
+                
+                // Allow wall jump momentum to carry further by reducing friction when locked
+                const frictionTime = p.wallJumpTimer > 0 ? 0.4 : DECEL_TIME; 
+
+                const stopFriction = Math.pow(0.001, dt / frictionTime); 
                 p.vx *= stopFriction;
                 if (Math.abs(p.vx) < 5) p.vx = 0;
             }
@@ -880,10 +885,7 @@ export class GameEngine {
             // Gravity
             p.vy += GRAVITY * dt;
 
-            // Variable Jump Height / Short Hop
-            if (p.vy < 0 && !input.jumpHeld) {
-                p.vy *= 0.92;
-            }
+            // Variable Jump Height logic REMOVED for consistency
         }
 
         if (!p.isDashing) {
@@ -1101,9 +1103,28 @@ export class GameEngine {
 
         // Crystals
         this.crystals.forEach(c => {
-            if (c.respawnTimer > 0) return;
-            // Bobbing
-            const bob = Math.sin(Date.now() / 200) * 2;
+            if (c.respawnTimer > 0) {
+                 // GHOST OUTLINE (New)
+                 ctx.save();
+                 ctx.strokeStyle = COLORS.crystal;
+                 ctx.lineWidth = 2;
+                 ctx.setLineDash([4, 4]);
+                 
+                 const cx = c.x + c.w/2;
+                 const cy = c.y + c.h/2;
+                 
+                 ctx.beginPath();
+                 ctx.moveTo(cx, cy - 8);
+                 ctx.lineTo(cx + 8, cy);
+                 ctx.lineTo(cx, cy + 8);
+                 ctx.lineTo(cx - 8, cy);
+                 ctx.closePath();
+                 ctx.stroke();
+                 ctx.restore();
+                 return;
+            }
+            // Bobbing (Slower)
+            const bob = Math.sin(Date.now() / 500) * 2; 
             ctx.fillStyle = COLORS.crystal;
             // Draw Diamond shape
             const cx = c.x + c.w/2;
