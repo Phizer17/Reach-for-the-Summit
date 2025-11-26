@@ -14,14 +14,27 @@ const App = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.TITLE);
   const [hudHeight, setHudHeight] = useState(0);
   const [hudBerries, setHudBerries] = useState(0);
+  const [hudTimer, setHudTimer] = useState("00:00.00");
+  const [pendingBerries, setPendingBerries] = useState(0);
+  const [berryPop, setBerryPop] = useState(false);
+  const [scorePop, setScorePop] = useState(false);
+  
   const [isRecordRun, setIsRecordRun] = useState(false);
   const [milestone, setMilestone] = useState<{ text: string, active: boolean, isRecord: boolean }>({ text: '', active: false, isRecord: false });
-  const [gameOverStats, setGameOverStats] = useState({ height: 0, berries: 0, rank: 'C' });
+  const [gameOverStats, setGameOverStats] = useState({ height: 0, berries: 0, rank: 'C', time: "00:00", speed: "0" });
   
-  // High score for title screen
+  // Input Highlighting
+  const [activeAction, setActiveAction] = useState<{jump: boolean, dash: boolean, left: boolean, right: boolean}>({ jump: false, dash: false, left: false, right: false });
+
   const [highScore, setHighScore] = useState(0);
 
-  // Input State
+  // Callbacks Ref to hold fresh instances of handlers without re-triggering effects
+  const callbacksRef = useRef({
+    onScoreUpdate: (h: number, b: number, isRecord: boolean, time: number, pb: number) => {},
+    onGameOver: (h: number, b: number, newRecord: boolean, time: number) => {},
+    onMilestone: (text: string, isRecord: boolean) => {}
+  });
+
   const inputRef = useRef({
     dir: 0,
     jump: false,
@@ -30,13 +43,36 @@ const App = () => {
     dashHeld: false
   });
 
-  const handleScoreUpdate = useCallback((h: number, b: number, isRecord: boolean) => {
+  const formatTime = (ms: number) => {
+      const totalSec = Math.floor(ms / 1000);
+      const m = Math.floor(totalSec / 60).toString().padStart(2, '0');
+      const s = (totalSec % 60).toString().padStart(2, '0');
+      const cs = Math.floor((ms % 1000) / 10).toString().padStart(2, '0');
+      return `${m}:${s}.${cs}`;
+  };
+
+  const handleScoreUpdate = useCallback((h: number, b: number, isRecord: boolean, time: number, pb: number) => {
     setHudHeight(h);
+    if (b > hudBerries) {
+        setScorePop(true);
+        setTimeout(() => setScorePop(false), 150);
+    }
     setHudBerries(b);
     setIsRecordRun(isRecord);
-  }, []);
+    
+    // Only update timer if the game is actively running (GameEngine handles this check too, but double safety)
+    if (gameState === GameState.PLAYING) {
+      setHudTimer(formatTime(time));
+    }
+    
+    if (pb > pendingBerries) {
+         setBerryPop(true);
+         setTimeout(() => setBerryPop(false), 100);
+    }
+    setPendingBerries(pb);
+  }, [hudBerries, pendingBerries, gameState]);
 
-  const handleGameOver = useCallback((h: number, b: number, newRecord: boolean) => {
+  const handleGameOver = useCallback((h: number, b: number, newRecord: boolean, time: number) => {
     let rank = "C";
     const score = h + b * 50;
     if (score > 1000) rank = "B";
@@ -44,7 +80,10 @@ const App = () => {
     if (score > 5000) rank = "S";
     if (score > 10000) rank = "🍓";
     
-    setGameOverStats({ height: h, berries: b, rank });
+    const sec = time / 1000;
+    const speed = sec > 0 ? (h / sec).toFixed(1) : "0";
+
+    setGameOverStats({ height: h, berries: b, rank, time: formatTime(time), speed });
     setGameState(GameState.GAMEOVER);
   }, []);
 
@@ -56,21 +95,27 @@ const App = () => {
     }, 2500);
   }, []);
 
+  // Update callbacks ref on every render so GameEngine calls the latest logic
+  useEffect(() => {
+    callbacksRef.current.onScoreUpdate = handleScoreUpdate;
+    callbacksRef.current.onGameOver = handleGameOver;
+    callbacksRef.current.onMilestone = handleMilestone;
+  });
+
   const animate = (time: number) => {
     if (previousTimeRef.current !== undefined) {
       let dt = (time - previousTimeRef.current) / 1000;
-      if (dt > 0.1) dt = 0.1; // Cap dt for lag spikes
+      if (dt > 0.1) dt = 0.1; 
       
       if (engineRef.current) {
-        // Feed input to engine
         engineRef.current.update(dt, {
           dir: inputRef.current.dir,
           jump: inputRef.current.jump,
-          dash: inputRef.current.dash
+          dash: inputRef.current.dash,
+          jumpHeld: inputRef.current.jumpHeld
         });
         engineRef.current.draw();
         
-        // Consume press-once inputs
         if (inputRef.current.jump) inputRef.current.jump = false;
         if (inputRef.current.dash) inputRef.current.dash = false;
       }
@@ -84,42 +129,60 @@ const App = () => {
     if (saved) setHighScore(parseInt(saved));
 
     if (canvasRef.current) {
+      // Initialize GameEngine with proxy functions that delegate to the ref
       engineRef.current = new GameEngine(
           canvasRef.current,
-          handleScoreUpdate,
-          handleGameOver,
-          handleMilestone
+          (h, b, r, t, pb) => callbacksRef.current.onScoreUpdate(h, b, r, t, pb),
+          (h, b, r, t) => callbacksRef.current.onGameOver(h, b, r, t),
+          (t, r) => callbacksRef.current.onMilestone(t, r)
       );
       requestRef.current = requestAnimationFrame(animate);
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (['a', 'arrowleft'].includes(k)) inputRef.current.dir = -1;
-      if (['d', 'arrowright'].includes(k)) inputRef.current.dir = 1;
-      
-      // Jump: Space, K, Z
+      if (['a', 'arrowleft'].includes(k)) {
+          inputRef.current.dir = -1;
+          setActiveAction(prev => ({...prev, left: true}));
+      }
+      if (['d', 'arrowright'].includes(k)) {
+          inputRef.current.dir = 1;
+          setActiveAction(prev => ({...prev, right: true}));
+      }
       if ([' ', 'k', 'z'].includes(k)) {
         if (!inputRef.current.jumpHeld) {
            inputRef.current.jump = true;
            inputRef.current.jumpHeld = true;
         }
+        setActiveAction(prev => ({...prev, jump: true}));
       }
-      // Dash: Shift, X, J
       if (['shift', 'x', 'j'].includes(k)) {
         if (!inputRef.current.dashHeld) {
            inputRef.current.dash = true;
            inputRef.current.dashHeld = true;
         }
+        setActiveAction(prev => ({...prev, dash: true}));
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (['a', 'arrowleft'].includes(k) && inputRef.current.dir === -1) inputRef.current.dir = 0;
-      if (['d', 'arrowright'].includes(k) && inputRef.current.dir === 1) inputRef.current.dir = 0;
-      if ([' ', 'k', 'z'].includes(k)) inputRef.current.jumpHeld = false;
-      if (['shift', 'x', 'j'].includes(k)) inputRef.current.dashHeld = false;
+      if (['a', 'arrowleft'].includes(k)) {
+          if (inputRef.current.dir === -1) inputRef.current.dir = 0;
+          setActiveAction(prev => ({...prev, left: false}));
+      }
+      if (['d', 'arrowright'].includes(k)) {
+          if (inputRef.current.dir === 1) inputRef.current.dir = 0;
+          setActiveAction(prev => ({...prev, right: false}));
+      }
+      if ([' ', 'k', 'z'].includes(k)) {
+          inputRef.current.jumpHeld = false;
+          setActiveAction(prev => ({...prev, jump: false}));
+      }
+      if (['shift', 'x', 'j'].includes(k)) {
+          inputRef.current.dashHeld = false;
+          setActiveAction(prev => ({...prev, dash: false}));
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -131,13 +194,14 @@ const App = () => {
       window.removeEventListener('keyup', handleKeyUp);
       cancelAnimationFrame(requestRef.current);
     };
-  }, [handleScoreUpdate, handleGameOver, handleMilestone]);
+  }, []); // Empty dependency array ensures GameEngine is created ONLY ONCE on mount
 
   const startGame = () => {
     sfx.init();
     if (engineRef.current) {
       engineRef.current.initGame();
       setGameState(GameState.PLAYING);
+      setHudTimer("00:00.00"); // Reset HUD timer on start
     }
   };
 
@@ -153,23 +217,36 @@ const App = () => {
     setIsRecordRun(false);
   };
 
-  // Touch Controls
   const handleTouchStart = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
-    // Prevent default is handled by CSS touch-action: none on body generally,
-    // but e.preventDefault() here stops mouse emulation and text selection
-    // e.preventDefault(); // Removed to allow multi-touch better on some devices, handled by CSS
-    if (action === 'left') inputRef.current.dir = -1;
-    if (action === 'right') inputRef.current.dir = 1;
-    if (action === 'jump') { inputRef.current.jump = true; inputRef.current.jumpHeld = true; }
-    if (action === 'dash') { inputRef.current.dash = true; inputRef.current.dashHeld = true; }
+    if (action === 'left') { inputRef.current.dir = -1; setActiveAction(prev => ({...prev, left: true})); }
+    if (action === 'right') { inputRef.current.dir = 1; setActiveAction(prev => ({...prev, right: true})); }
+    if (action === 'jump') { 
+        inputRef.current.jump = true; inputRef.current.jumpHeld = true; 
+        setActiveAction(prev => ({...prev, jump: true}));
+    }
+    if (action === 'dash') { 
+        inputRef.current.dash = true; inputRef.current.dashHeld = true; 
+        setActiveAction(prev => ({...prev, dash: true}));
+    }
   };
 
   const handleTouchEnd = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
-    // e.preventDefault(); 
-    if (action === 'left' && inputRef.current.dir === -1) inputRef.current.dir = 0;
-    if (action === 'right' && inputRef.current.dir === 1) inputRef.current.dir = 0;
-    if (action === 'jump') inputRef.current.jumpHeld = false;
-    if (action === 'dash') inputRef.current.dashHeld = false;
+    if (action === 'left') { 
+        if(inputRef.current.dir === -1) inputRef.current.dir = 0; 
+        setActiveAction(prev => ({...prev, left: false})); 
+    }
+    if (action === 'right') { 
+        if(inputRef.current.dir === 1) inputRef.current.dir = 0; 
+        setActiveAction(prev => ({...prev, right: false})); 
+    }
+    if (action === 'jump') { 
+        inputRef.current.jumpHeld = false; 
+        setActiveAction(prev => ({...prev, jump: false}));
+    }
+    if (action === 'dash') { 
+        inputRef.current.dashHeld = false; 
+        setActiveAction(prev => ({...prev, dash: false}));
+    }
   };
 
   return (
@@ -179,6 +256,9 @@ const App = () => {
 
         {/* HUD */}
         <div className="absolute top-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col gap-2">
+           {/* Timer */}
+           <div className={`font-mono text-2xl font-bold drop-shadow-md ${gameState === GameState.GAMEOVER ? 'text-gray-500' : 'text-gray-300'}`}>{hudTimer}</div>
+           
            <div className="flex items-center gap-2">
               <div className={`bg-black/50 border-2 rounded-full px-4 py-1 flex items-center gap-2 transition-colors duration-300 ${
                   isRecordRun ? 'border-yellow-400 text-yellow-300 shadow-[0_0_10px_rgba(255,215,0,0.5)]' : 'border-white/20 text-white'
@@ -186,10 +266,19 @@ const App = () => {
                  <span>▲</span> <span>{hudHeight}m</span>
               </div>
            </div>
-           <div className="flex items-center gap-2">
-              <div className="bg-black/50 border-2 border-white/20 rounded-full px-4 py-1 flex items-center gap-2 text-red-500">
+           <div className="flex items-center gap-2 relative">
+              <div className={`bg-black/50 border-2 border-white/20 rounded-full px-4 py-1 flex items-center gap-2 transition-all duration-150 ${
+                  scorePop ? 'scale-125 bg-red-500/20 border-red-400' : ''
+              }`}>
                  <span>🍓</span> <span className="text-white">{hudBerries}</span>
               </div>
+              {pendingBerries > 0 && (
+                  <div className={`absolute -top-2 left-16 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full transition-transform ${
+                      berryPop ? 'scale-150' : 'scale-100'
+                  }`}>
+                      +{pendingBerries}
+                  </div>
+              )}
            </div>
         </div>
 
@@ -220,7 +309,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_26</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_34_fix4</div>
           </div>
         )}
 
@@ -229,14 +318,20 @@ const App = () => {
           <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center p-8 z-30 animate-fade-in-up">
             <div className="w-full max-w-xs bg-gray-800 border-4 border-white rounded-2xl p-6 shadow-2xl mb-6">
               <h2 className="text-4xl font-bold text-red-500 text-center mb-6 drop-shadow-sm">GAME OVER</h2>
-              <div className="flex justify-between border-b border-dashed border-gray-600 pb-2 mb-3 text-gray-400 text-lg">
-                <span>Height</span>
-                <span className="text-white font-bold">{gameOverStats.height}m</span>
+              <div className="grid grid-cols-2 gap-4 mb-4 text-sm text-gray-400">
+                  <div className="border-b border-dashed border-gray-600 pb-1">Height</div>
+                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.height}m</div>
+                  
+                  <div className="border-b border-dashed border-gray-600 pb-1">Time</div>
+                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.time}</div>
+                  
+                  <div className="border-b border-dashed border-gray-600 pb-1">Speed</div>
+                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.speed} m/s</div>
+
+                  <div className="border-b border-dashed border-gray-600 pb-1">Berries</div>
+                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.berries}</div>
               </div>
-              <div className="flex justify-between border-b border-dashed border-gray-600 pb-2 mb-3 text-gray-400 text-lg">
-                <span>Strawberries</span>
-                <span className="text-white font-bold">{gameOverStats.berries}</span>
-              </div>
+              
               <div className="flex justify-between items-center text-gray-400 text-lg">
                 <span>Rank</span>
                 <span className="text-yellow-400 font-black text-4xl">{gameOverStats.rank}</span>
@@ -259,38 +354,39 @@ const App = () => {
           </div>
         )}
 
-        {/* Mobile Controls Overlay - Changed md:hidden to lg:hidden to show on tablets/large phones */}
+        {/* Mobile Controls Overlay */}
+        {gameState === GameState.PLAYING && (
         <div 
           className="absolute inset-0 pointer-events-none z-40 lg:hidden flex flex-col justify-end pb-16 px-4"
-          onContextMenu={(e) => e.preventDefault()} // Prevent long-press menu
+          onContextMenu={(e) => e.preventDefault()} 
         >
             <div className="flex justify-between w-full items-end">
               {/* D-Pad Area */}
               <div className="flex gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
+                   className={`w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.left ? 'bg-white/40 border-white' : ''}`}
                    onTouchStart={handleTouchStart('left')} onTouchEnd={handleTouchEnd('left')}
                  >
                    <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                  </div>
                  <div 
-                   className="w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center active:bg-white/30 transition-colors"
+                   className={`w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.right ? 'bg-white/40 border-white' : ''}`}
                    onTouchStart={handleTouchStart('right')} onTouchEnd={handleTouchEnd('right')}
                  >
                    <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
                  </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons with Visual Feedback */}
               <div className="flex flex-col gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className="w-20 h-20 bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+                   className={`w-20 h-20 bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.jump ? 'scale-95 bg-white/50' : ''}`}
                    onTouchStart={handleTouchStart('jump')} onTouchEnd={handleTouchEnd('jump')}
                  >
                     <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
                  </div>
                  <div 
-                   className="w-20 h-20 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+                   className={`w-20 h-20 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.dash ? 'scale-95 bg-white/50' : ''}`}
                    onTouchStart={handleTouchStart('dash')} onTouchEnd={handleTouchEnd('dash')}
                  >
                     <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path transform="translate(0, 3)" d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41M7.41,9.41L12,4.83L16.59,9.41L18,8L12,2L6,8L7.41,9.41Z"/></svg>
@@ -298,6 +394,7 @@ const App = () => {
               </div>
             </div>
         </div>
+        )}
       </div>
     </div>
   );

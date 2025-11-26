@@ -18,6 +18,18 @@ export interface Rect {
   h: number;
 }
 
+export interface TrailPoint {
+  x: number;
+  y: number;
+  alpha: number;
+  sprite: boolean;
+  frame: {
+    faceDir: number;
+    sx: number;
+    sy: number;
+  };
+}
+
 export interface PlayerState extends Rect {
   vx: number;
   vy: number;
@@ -29,8 +41,11 @@ export interface PlayerState extends Rect {
   highestY: number;
   score: number;
   history: Point[];
-  flashTimer: number; // Visual flash when state restored
-  dashBuffer: number; // Input buffering for dash
+  trail: TrailPoint[]; 
+  flashTimer: number; 
+  dashBuffer: number; 
+  blinkTimer: number; // New: Eye blink timer
+  moveTimer: number; // New: For acceleration curve (96ms)
 }
 
 export interface Platform extends Rect {}
@@ -39,12 +54,12 @@ export interface Solid extends Rect {}
 
 export interface Spring extends Rect {
   dir: 'up' | 'left' | 'right';
-  animTimer: number; // 0 = idle, >0 = expanding/retracting
+  animTimer: number; 
 }
 
 export interface Berry extends Rect {
   baseY: number;
-  state: 0 | 1 | 2; // 0: Idle, 1: Following, 2: Collected
+  state: 0 | 1 | 2; 
 }
 
 export interface Crystal extends Rect {

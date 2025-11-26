@@ -1,6 +1,6 @@
 
-import { GameState, Rect, Platform, Berry, Crystal, Solid, Particle, Spring } from '../types';
-import { COLORS, CHAPTERS, VIEW_WIDTH, TILE_SIZE, GRAVITY, DASH_SPEED, WALL_SLIDE_SPEED, WALL_JUMP_X, WALL_JUMP_Y, JUMP_FORCE, DASH_TIME, SPRING_SPEED_Y, SPRING_SPEED_X, SPRING_SIDE_LIFT } from '../constants';
+import { GameState, Rect, Platform, Berry, Crystal, Solid, Particle, Spring, TrailPoint } from '../types';
+import { COLORS, CHAPTERS, VIEW_WIDTH, TILE_SIZE, GRAVITY, DASH_SPEED, WALL_SLIDE_SPEED, WALL_JUMP_X, WALL_JUMP_Y, JUMP_FORCE, DASH_TIME, SPRING_SPEED_Y, SPRING_SPEED_X, SPRING_SIDE_LIFT, MAX_SPEED, ACCEL_TIME, DECEL_TIME } from '../constants';
 import { sfx } from '../services/audioService';
 
 export class GameEngine {
@@ -20,10 +20,12 @@ export class GameEngine {
     platformImg: HTMLImageElement | null = null;
     bgImg: HTMLImageElement | null = null;
     springImg: HTMLImageElement | null = null;
+    berryImg: HTMLImageElement | null = null; 
     
     // Generation State
     lastWasCrystal: boolean = false;
     lastWasSpringUp: boolean = false;
+    lastSolidY: number = 0; 
     
     // Entities
     player = {
@@ -31,14 +33,19 @@ export class GameEngine {
         faceDir: 1, grounded: false, canDash: true, isDashing: false,
         dashTimer: 0, dashDx: 0, dashDy: 0,
         highestY: 0, score: 0,
-        trail: [] as any[], history: [] as any[], followingBerries: [] as Berry[],
+        trail: [] as TrailPoint[], 
+        history: [] as any[], followingBerries: [] as Berry[],
         sx: 1, sy: 1, jumpBuffer: 0, coyoteTimer: 0, wallJumpTimer: 0, onWall: 0,
         settleTimer: 0, settleStreak: 0,
         lastMilestone: 0,
         wallBounceTimer: 0,
         flashTimer: 0,
         dashBuffer: 0, 
-        hasTriggeredRecord: false
+        blinkTimer: 0, 
+        moveTimer: 0,
+        hasTriggeredRecord: false,
+        startTime: 0,
+        endTime: 0
     };
     
     platforms: Platform[] = [];
@@ -68,15 +75,15 @@ export class GameEngine {
         color: '#fff'
     };
     
-    // Callbacks to React
-    onScoreUpdate: (height: number, berries: number, isRecord: boolean) => void;
-    onGameOver: (height: number, berries: number, newRecord: boolean) => void;
+    // Callbacks
+    onScoreUpdate: (height: number, berries: number, isRecord: boolean, time: number, pendingBerries: number) => void;
+    onGameOver: (height: number, berries: number, newRecord: boolean, time: number) => void;
     onMilestone: (text: string, isRecord: boolean) => void;
     
     constructor(
         canvas: HTMLCanvasElement, 
-        onScore: (h: number, b: number, rec: boolean) => void,
-        onOver: (h: number, b: number, rec: boolean) => void,
+        onScore: (h: number, b: number, rec: boolean, t: number, pb: number) => void,
+        onOver: (h: number, b: number, rec: boolean, t: number) => void,
         onMile: (t: string, rec: boolean) => void
     ) {
         this.canvas = canvas;
@@ -100,6 +107,8 @@ export class GameEngine {
         this.canvas.height = this.canvas.clientHeight * (VIEW_WIDTH / this.canvas.clientWidth);
         this.viewHeight = this.canvas.height;
         if(this.ctx) this.ctx.imageSmoothingEnabled = false;
+        // Calculate max radius for death ripple
+        this.deathRipple.maxR = Math.sqrt(Math.pow(this.canvas.width, 2) + Math.pow(this.canvas.height, 2));
     }
 
     vibrate(ms: number) {
@@ -109,113 +118,30 @@ export class GameEngine {
     }
 
     loadTextures() {
-        // --- TILESET ATLAS (96x72) ---
-        const c = {
-            base: '#201c3b',      
-            mid: '#332c50',       
-            light: '#68c2d3',     
-            shadow: '#110d21',    
-            snow: '#ffffff',      
-            snowShade: '#8daac9'  
-        };
+        const c = { base: '#201c3b', mid: '#332c50', light: '#68c2d3', shadow: '#110d21', snow: '#ffffff', snowShade: '#8daac9' };
+        const tilesetSvg = `<svg width="96" height="96" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="rockPat" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse"><rect width="24" height="24" fill="${c.base}"/><path d="M0 24 L24 0" stroke="${c.mid}" stroke-width="6"/><path d="M-12 24 L12 0" stroke="${c.mid}" stroke-width="6"/><path d="M12 24 L36 0" stroke="${c.mid}" stroke-width="6"/><rect x="6" y="14" width="2" height="2" fill="${c.light}" opacity="0.3"/><rect x="16" y="4" width="2" height="2" fill="${c.light}" opacity="0.3"/></pattern></defs><rect width="96" height="96" fill="url(#rockPat)"/><g><rect x="0" y="0" width="2" height="96" fill="${c.light}"/><rect x="2" y="0" width="2" height="96" fill="${c.mid}" opacity="0.5"/></g><g transform="translate(48, 0)"><rect x="22" y="0" width="2" height="96" fill="${c.shadow}"/><rect x="20" y="0" width="2" height="96" fill="${c.shadow}" opacity="0.5"/></g><g transform="translate(72, 0)"><rect x="0" y="0" width="2" height="96" fill="${c.light}"/><rect x="22" y="0" width="2" height="96" fill="${c.shadow}"/></g><g><rect x="0" y="0" width="96" height="6" fill="${c.snow}"/><rect x="0" y="6" width="96" height="2" fill="${c.snowShade}"/><path d="M4 8 H8 V10 H4 Z" fill="${c.snow}"/><path d="M20 8 H26 V11 H20 Z" fill="${c.snow}"/><path d="M44 8 H48 V9 H44 Z" fill="${c.snow}"/><path d="M60 8 H66 V12 H60 Z" fill="${c.snow}"/><path d="M85 8 H88 V10 H85 Z" fill="${c.snow}"/><rect x="0" y="0" width="2" height="6" fill="${c.snow}"/><rect x="94" y="0" width="2" height="6" fill="${c.snow}"/></g><g transform="translate(0, 48)"><rect x="0" y="22" width="96" height="2" fill="${c.shadow}"/><rect x="0" y="20" width="96" height="2" fill="${c.shadow}" opacity="0.5"/></g><g transform="translate(0, 72)"><rect x="0" y="22" width="96" height="2" fill="${c.shadow}"/><rect x="0" y="20" width="96" height="2" fill="${c.shadow}" opacity="0.5"/><rect x="0" y="0" width="96" height="6" fill="${c.snow}"/><rect x="0" y="6" width="96" height="2" fill="${c.snowShade}"/></g></svg>`.trim();
+        this.tilesetImg = new Image(); this.tilesetImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(tilesetSvg);
 
-        const tilesetSvg = `
-        <svg width="96" height="72" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <pattern id="rockPat" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <rect width="24" height="24" fill="${c.base}"/>
-                    <path d="M0 24 L24 0" stroke="${c.mid}" stroke-width="6"/>
-                    <path d="M-12 24 L12 0" stroke="${c.mid}" stroke-width="6"/>
-                    <path d="M12 24 L36 0" stroke="${c.mid}" stroke-width="6"/>
-                    <rect x="6" y="14" width="2" height="2" fill="${c.light}" opacity="0.3"/>
-                    <rect x="16" y="4" width="2" height="2" fill="${c.light}" opacity="0.3"/>
-                </pattern>
-            </defs>
-            <rect width="96" height="72" fill="url(#rockPat)"/>
-            <g>
-                <rect x="0" y="0" width="2" height="72" fill="${c.light}"/>
-                <rect x="2" y="0" width="2" height="72" fill="${c.mid}" opacity="0.5"/>
-                <rect x="0" y="10" width="2" height="4" fill="${c.base}"/> 
-                <rect x="0" y="40" width="2" height="2" fill="${c.base}"/> 
-            </g>
-            <g transform="translate(48, 0)">
-                <rect x="22" y="0" width="2" height="72" fill="${c.shadow}"/>
-                <rect x="20" y="0" width="2" height="72" fill="${c.shadow}" opacity="0.5"/>
-            </g>
-            <g transform="translate(72, 0)">
-                <rect x="0" y="0" width="2" height="72" fill="${c.light}"/>
-                <rect x="22" y="0" width="2" height="72" fill="${c.shadow}"/>
-            </g>
-            <g>
-                <rect x="0" y="0" width="96" height="6" fill="${c.snow}"/>
-                <rect x="0" y="6" width="96" height="2" fill="${c.snowShade}"/>
-                <path d="M4 8 H8 V10 H4 Z" fill="${c.snow}"/>
-                <path d="M20 8 H26 V11 H20 Z" fill="${c.snow}"/>
-                <path d="M44 8 H48 V9 H44 Z" fill="${c.snow}"/>
-                <path d="M60 8 H66 V12 H60 Z" fill="${c.snow}"/>
-                <path d="M85 8 H88 V10 H85 Z" fill="${c.snow}"/>
-                <rect x="0" y="0" width="2" height="6" fill="${c.snow}"/>
-                <rect x="94" y="0" width="2" height="6" fill="${c.snow}"/>
-            </g>
-            <g transform="translate(0, 48)">
-                <rect x="0" y="22" width="96" height="2" fill="${c.shadow}"/>
-                <rect x="0" y="20" width="96" height="2" fill="${c.shadow}" opacity="0.5"/>
-            </g>
-        </svg>`.trim();
-        
-        this.tilesetImg = new Image();
-        this.tilesetImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(tilesetSvg);
+        const platformSvg = `<svg width="24" height="14" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="2" width="24" height="8" fill="#5c4436"/><rect x="0" y="2" width="24" height="2" fill="#82604d"/> <rect x="0" y="9" width="24" height="1" fill="#33251d"/> <rect x="4" y="2" width="2" height="8" fill="#33251d" opacity="0.5"/><rect x="18" y="2" width="2" height="8" fill="#33251d" opacity="0.5"/><rect x="0" y="0" width="24" height="3" fill="#e8f7ff"/></svg>`.trim();
+        this.platformImg = new Image(); this.platformImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(platformSvg);
 
-        // --- PLATFORM ---
-        const platformSvg = `
-        <svg width="24" height="14" xmlns="http://www.w3.org/2000/svg">
-            <rect x="0" y="2" width="24" height="8" fill="#5c4436"/>
-            <rect x="0" y="2" width="24" height="2" fill="#82604d"/> 
-            <rect x="0" y="9" width="24" height="1" fill="#33251d"/> 
-            <rect x="4" y="2" width="2" height="8" fill="#33251d" opacity="0.5"/>
-            <rect x="18" y="2" width="2" height="8" fill="#33251d" opacity="0.5"/>
-            <rect x="0" y="0" width="24" height="3" fill="#e8f7ff"/>
-        </svg>`.trim();
+        const springSvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="18" width="20" height="6" rx="2" fill="#555"/><rect x="3" y="19" width="18" height="4" fill="#333"/><path d="M4 18 L20 18 L4 14 L20 14 L4 10" stroke="#ccc" stroke-width="3" fill="none" stroke-linecap="round"/><rect x="2" y="8" width="20" height="4" rx="1" fill="#e04040"/><rect x="4" y="9" width="16" height="2" fill="#ff6666"/></svg>`.trim();
+        this.springImg = new Image(); this.springImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(springSvg);
 
-        this.platformImg = new Image();
-        this.platformImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(platformSvg);
+        const bgSvg = `<svg width="552" height="960" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sky" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#111221"/><stop offset="100%" stop-color="#282638"/></linearGradient></defs><rect width="552" height="960" fill="url(#sky)"/><path d="M0 960 L0 800 L100 700 L250 850 L400 720 L552 800 L552 960 Z" fill="#1b1b29"/><g fill="#fff" opacity="0.4"><circle cx="50" cy="100" r="1"/><circle cx="200" cy="50" r="1.5"/><circle cx="450" cy="150" r="1"/><circle cx="300" cy="300" r="1"/><circle cx="100" cy="400" r="1"/></g></svg>`.trim();
+        this.bgImg = new Image(); this.bgImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(bgSvg);
 
-        // --- SPRING ---
-        const springSvg = `
+        const berrySvg = `
         <svg width="24" height="24" xmlns="http://www.w3.org/2000/svg">
-            <!-- Base -->
-            <rect x="2" y="18" width="20" height="6" rx="2" fill="#555"/>
-            <rect x="3" y="19" width="18" height="4" fill="#333"/>
-            <!-- Coils -->
-            <path d="M4 18 L20 18 L4 14 L20 14 L4 10" stroke="#ccc" stroke-width="3" fill="none" stroke-linecap="round"/>
-            <!-- Top Plate -->
-            <rect x="2" y="8" width="20" height="4" rx="1" fill="#e04040"/>
-            <rect x="4" y="9" width="16" height="2" fill="#ff6666"/>
+             <path d="M12 21 C17 19 20 14 20 10 C20 7 18 5 12 5 C6 5 4 7 4 10 C4 14 7 19 12 21 Z" fill="#ff004d"/>
+             <circle cx="8" cy="9" r="1" fill="#fff" opacity="0.6"/>
+             <circle cx="16" cy="9" r="1" fill="#fff" opacity="0.6"/>
+             <circle cx="12" cy="13" r="1" fill="#fff" opacity="0.6"/>
+             <circle cx="8" cy="16" r="1" fill="#fff" opacity="0.6"/>
+             <circle cx="16" cy="16" r="1" fill="#fff" opacity="0.6"/>
+             <path d="M12 5 L9 3 L8 6 L12 8 L16 6 L15 3 Z" fill="#00e436"/>
         </svg>`.trim();
-        
-        this.springImg = new Image();
-        this.springImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(springSvg);
-
-        // --- BACKGROUND ---
-        const bgSvg = `
-        <svg width="552" height="960" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stop-color="#111221"/>
-                    <stop offset="100%" stop-color="#282638"/>
-                </linearGradient>
-            </defs>
-            <rect width="552" height="960" fill="url(#sky)"/>
-            <path d="M0 960 L0 800 L100 700 L250 850 L400 720 L552 800 L552 960 Z" fill="#1b1b29"/>
-            <g fill="#fff" opacity="0.4">
-                <circle cx="50" cy="100" r="1"/><circle cx="200" cy="50" r="1.5"/>
-                <circle cx="450" cy="150" r="1"/><circle cx="300" cy="300" r="1"/>
-                <circle cx="100" cy="400" r="1"/>
-            </g>
-        </svg>`.trim();
-
-        this.bgImg = new Image();
-        this.bgImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(bgSvg);
+        this.berryImg = new Image(); this.berryImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(berrySvg);
     }
 
     initGame() {
@@ -227,8 +153,8 @@ export class GameEngine {
         this.particles = [];
         this.ripples = [];
         
-        // Ground: Optimized size to prevent lag (reduced from 400)
         this.solids.push({ x: -50, y: 150, w: VIEW_WIDTH + 100, h: 48 });
+        this.lastSolidY = 150;
         
         this.spawnY = 0;
         this.lastWasCrystal = false;
@@ -245,11 +171,16 @@ export class GameEngine {
         this.player.score = 0;
         this.player.followingBerries = [];
         this.player.history = [];
+        this.player.trail = []; 
         this.player.lastMilestone = 0;
         this.player.wallBounceTimer = 0;
         this.player.flashTimer = 0;
         this.player.dashBuffer = 0;
+        this.player.blinkTimer = 0;
+        this.player.moveTimer = 0;
         this.player.hasTriggeredRecord = false;
+        this.player.startTime = Date.now();
+        this.player.endTime = 0;
         this.lastMilestone = 0;
         
         this.deathRipple.active = false;
@@ -260,7 +191,7 @@ export class GameEngine {
         
         for (let i = 0; i < 10; i++) this.generateMap();
         
-        this.onScoreUpdate(0, 0, false);
+        this.onScoreUpdate(0, 0, false, 0, 0);
     }
 
     setChapter(h: number) {
@@ -294,10 +225,18 @@ export class GameEngine {
         const heightFactor = Math.min(1, Math.abs(this.spawnY) / 20000); 
         
         let minGapTiles = 4 + Math.floor(heightFactor * 2); 
-        let maxGapTiles = 7 + Math.floor(heightFactor * 3); 
+        
+        // Safety cap: Player can jump ~120px + Dash 100px. 
+        // Max gap should not exceed ~200px (approx 8 tiles) to prevent dead ends.
+        let maxGapTiles = Math.min(8, 7 + Math.floor(heightFactor * 3)); 
         
         let gapTiles = Math.floor(minGapTiles + Math.random() * (maxGapTiles - minGapTiles));
         let baseGap = gapTiles * TILE_SIZE;
+
+        const potentialY = this.spawnY - baseGap;
+        if (Math.abs(potentialY - this.lastSolidY) < TILE_SIZE * 3) {
+            baseGap += TILE_SIZE * 2; 
+        }
 
         if (this.lastWasSpringUp) {
             baseGap = 200 + Math.random() * 50;
@@ -311,7 +250,6 @@ export class GameEngine {
         this.spawnY -= baseGap;
         const currentY = this.spawnY;
         
-        // --- CRYSTALS ---
         let cChance = 0.1;
         if (Math.random() < cChance) {
             const maxCol = Math.floor((VIEW_WIDTH - 48) / TILE_SIZE);
@@ -324,7 +262,6 @@ export class GameEngine {
             }
         }
 
-        // --- SOLIDS ---
         let solidChance = 0.75;
         
         if (Math.random() < solidChance) {
@@ -342,7 +279,16 @@ export class GameEngine {
             let hS = hTiles * TILE_SIZE;
             
             this.solids.push({ x, y: currentY - hS, w, h: hS });
+            this.lastSolidY = currentY - hS;
             
+            if (Math.random() > 0.6) {
+                const berryX = x + (Math.random() > 0.5 ? -40 : w + 10);
+                const berryY = currentY - hS - 20 - Math.random() * 40; 
+                if (berryX > 20 && berryX < VIEW_WIDTH - 20) {
+                    this.berries.push({ x: berryX, y: berryY, w: 30, h: 30, baseY: berryY, state: 0 });
+                }
+            }
+
             const growthSteps = Math.floor(Math.random() * 3);
             for(let i=0; i<growthSteps; i++) {
                 const side = Math.random() > 0.5 ? 1 : -1;
@@ -357,10 +303,8 @@ export class GameEngine {
                 }
             }
 
-            // --- SPRING GENERATION ---
             if (Math.random() < 0.15) {
                 const springX = x + Math.floor(Math.random() * wTiles) * TILE_SIZE;
-                // Prevent spawning in tight gaps
                 if (!this.isSolidAt(springX - TILE_SIZE, currentY - hS - TILE_SIZE) && 
                     !this.isSolidAt(springX + TILE_SIZE, currentY - hS - TILE_SIZE)) {
                         this.springs.push({
@@ -373,28 +317,19 @@ export class GameEngine {
             } 
             else if (Math.random() < 0.15) {
                 const side = Math.random() > 0.5 ? 'right' : 'left';
-                // FIX: Ensure spring is attached to the OUTER side of the block
-                // If Side is Right (pushes right), it must be on the RIGHT edge of a block located to its LEFT.
-                // x is block left edge. x+w is block right edge.
-                // Side Right Spring: x = block.x + block.w. 
-                
                 const springX = side === 'right' ? x + w : x - TILE_SIZE;
                 const springY = (currentY - hS) + Math.floor(Math.random() * hTiles) * TILE_SIZE;
                 
-                // Check valid placement
                 let valid = false;
                 if (springX >= 0 && springX < VIEW_WIDTH) {
                     if (side === 'right') {
-                        // Spring at x+w. Needs block at left (x+w-TILE_SIZE)
-                        if (!this.isSolidAt(springX + TILE_SIZE, springY)) valid = true;
+                        if (this.isSolidAt(springX - TILE_SIZE, springY)) valid = true;
                     } else {
-                        // Spring at x-TILE. Needs block at right (x)
-                        if (!this.isSolidAt(springX - TILE_SIZE, springY)) valid = true;
+                        if (this.isSolidAt(springX + TILE_SIZE, springY)) valid = true;
                     }
                 }
 
                 if (valid) {
-                    // Safety check vertical neighbors for 1-gap
                     if (!this.isSolidAt(springX, springY - TILE_SIZE) && !this.isSolidAt(springX, springY + TILE_SIZE)) {
                         this.springs.push({
                             x: springX, y: springY,
@@ -408,8 +343,7 @@ export class GameEngine {
             return;
         }
 
-        const hasBerry = Math.random() > 0.85;
-        const wTiles = hasBerry ? 3 : 4 + Math.floor(Math.random() * 3);
+        const wTiles = 3 + Math.floor(Math.random() * 3);
         const wP = wTiles * TILE_SIZE;
         const maxCol = Math.floor((VIEW_WIDTH - wP) / TILE_SIZE);
         const col = Math.floor(Math.random() * maxCol);
@@ -417,8 +351,8 @@ export class GameEngine {
         
         if (!this.checkSolidOverlap(xP, currentY, wP, TILE_SIZE)) {
             this.platforms.push({ x: xP, y: currentY, w: wP, h: 14 });
-            if (hasBerry) {
-                this.berries.push({ x: xP + wP / 2 - 15, y: currentY - 40, w: 30, h: 30, baseY: currentY - 40, state: 0 });
+            if (Math.random() > 0.8) {
+                 this.berries.push({ x: xP + wP / 2 - 15, y: currentY - 40, w: 30, h: 30, baseY: currentY - 40, state: 0 });
             }
         }
     }
@@ -427,6 +361,15 @@ export class GameEngine {
         const r = { x: x - 60, y: y - 60, w: w + 120, h: h + 120 };
         for (const s of this.solids) {
             if (this.AABB(r, s)) return true;
+        }
+        return false;
+    }
+
+    checkWallOverlap(offset: number): boolean {
+        const p = this.player;
+        const rect = { x: p.x + offset, y: p.y, w: p.w, h: p.h };
+        for (const s of this.solids) {
+            if (this.AABB(rect, s)) return true;
         }
         return false;
     }
@@ -466,12 +409,27 @@ export class GameEngine {
 
     resolveSolidsX() {
         const p = this.player;
-        // FIX: Reduce bottom of hitbox by 6px for X collision
-        // This allows the player to "step up" small seams without getting stopped
+        // Seam snagging fix: smaller height check
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h - 6 };
         
         for (const s of this.solids) {
             if (this.AABB(rect, s)) {
+                // "Step Up" Logic
+                const stepY = p.y - 4;
+                const stepRect = { x: p.x, y: stepY, w: p.w, h: p.h };
+                let stepCollision = false;
+                
+                for(const otherS of this.solids) {
+                    if(this.AABB(stepRect, otherS)) {
+                        stepCollision = true; break;
+                    }
+                }
+                
+                if (!stepCollision) {
+                    p.y -= 4; 
+                    continue; 
+                }
+
                 if (p.vx > 0) {
                     p.x = s.x - p.w;
                     p.vx = 0;
@@ -505,10 +463,9 @@ export class GameEngine {
         for (const s of this.springs) {
             if (this.AABB(rect, { x: s.x + 6, y: s.y + 6, w: s.w - 12, h: s.h - 12 })) {
                 sfx.play('spring');
-                this.vibrate(30); // Haptic
+                this.vibrate(30); 
                 s.animTimer = 0.2;
                 
-                // Restore State
                 p.canDash = true; 
                 p.isDashing = false;
                 p.dashTimer = 0;
@@ -528,8 +485,6 @@ export class GameEngine {
                     p.faceDir = 1;
                     p.sx = 1.5; p.sy = 0.5;
                 }
-                
-                this.spawnEffect(s.x + 12, s.y + 12, '#fff', 5);
             }
         }
     }
@@ -546,7 +501,7 @@ export class GameEngine {
                     p.canDash = true;
                     c.respawnTimer = 2.5;
                     sfx.play('crystal');
-                    this.vibrate(50); // Haptic
+                    this.vibrate(50); 
                     this.hitStop = 0.05;
                     this.shake = 4;
                     p.flashTimer = 0.1;
@@ -600,7 +555,7 @@ export class GameEngine {
         }
     }
 
-    update(dt: number, input: { dir: number, jump: boolean, dash: boolean }) {
+    update(dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
         for (let i = 0; i < 3; i++) {
             this.currentBg[i] += (this.targetBg[i] - this.currentBg[i]) * 2 * dt;
         }
@@ -618,7 +573,8 @@ export class GameEngine {
                 if (this.deathRipple.r > targetR - 10) {
                      const p = this.player;
                      if (this.deathRipple.active) {
-                         this.onGameOver(p.highestY, p.score, p.highestY > this.highScore);
+                         p.endTime = Date.now();
+                         this.onGameOver(p.highestY, p.score, p.highestY > this.highScore, p.endTime - p.startTime);
                      }
                 }
             }
@@ -639,6 +595,8 @@ export class GameEngine {
 
         if(p.flashTimer > 0) p.flashTimer -= dt;
         if(p.dashBuffer > 0) p.dashBuffer -= dt;
+        if(p.blinkTimer > 0) p.blinkTimer -= dt;
+        else if (Math.random() < 0.01) p.blinkTimer = 0.15;
 
         if (input.dash && !p.canDash) {
             p.dashBuffer = 0.08; 
@@ -651,9 +609,13 @@ export class GameEngine {
 
         const h = Math.floor(Math.abs(p.y) / 10);
         const isRecord = this.highScore > 0 && h > this.highScore;
+        
         if (h > p.highestY) {
             p.highestY = h;
-            this.onScoreUpdate(h, p.score, isRecord);
+            // Only update score if not dying
+            if (this.state !== GameState.DYING) {
+                this.onScoreUpdate(h, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
+            }
             if (isRecord && !p.hasTriggeredRecord && h < this.highScore + 50) {
                  this.onMilestone("NEW RECORD!!", true);
                  p.hasTriggeredRecord = true;
@@ -663,6 +625,10 @@ export class GameEngine {
                 this.onMilestone(p.lastMilestone + "m", false);
                 this.setChapter(p.lastMilestone);
             }
+        } else {
+             if (this.state !== GameState.DYING) {
+                this.onScoreUpdate(p.highestY, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
+             }
         }
 
         if (p.y > this.cameraY + this.viewHeight + 100) {
@@ -685,14 +651,12 @@ export class GameEngine {
             p.wallBounceTimer -= dt;
         }
 
-        // --- PHYSICS SUB-STEPPING ---
-        const MAX_STEP = 0.01; // 10ms per step
+        const MAX_STEP = 0.01; 
         let remainingDt = dt;
         
         while(remainingDt > 0) {
             const step = Math.min(remainingDt, MAX_STEP);
             const effectiveDash = input.dash || (p.dashBuffer > 0 && p.canDash);
-            
             this.updatePhysicsSubStep(step, { ...input, dash: effectiveDash });
             remainingDt -= step;
         }
@@ -700,6 +664,10 @@ export class GameEngine {
         if (!wasGrounded && p.grounded) {
             p.sx = 1.4; p.sy = 0.6;
             if (!p.canDash) p.flashTimer = 0.1; 
+            p.settleTimer = 0; 
+        }
+        if (wasGrounded && !p.grounded) {
+            p.settleTimer = 0; 
         }
         
         this.checkEntityCollisions();
@@ -724,26 +692,46 @@ export class GameEngine {
             }
         });
 
+        // Combo Logic
         if (p.grounded && p.followingBerries.length > 0) {
             p.settleTimer += dt;
-            if (p.settleTimer > 0.15) { 
-                const b = p.followingBerries.shift();
-                if (b) {
-                    b.state = 2;
-                    p.score++;
-                    this.onScoreUpdate(Math.floor(Math.abs(p.y)/10), p.score, isRecord);
-                    p.settleStreak++;
-                    sfx.play('berry', p.settleStreak); 
-                    this.spawnEffect(p.x + 12, p.y + 12, COLORS.berry, 8);
-                    this.spawnRipple(p.x + 12, p.y + 12);
-                    p.settleTimer = 0; 
+            if (p.settleTimer > 1.0) { 
+                const expected = Math.floor((p.settleTimer - 1.0) / 0.15) + 1;
+                const countCollected = p.settleStreak;
+                
+                if (expected > countCollected) {
+                    const b = p.followingBerries.shift();
+                    if (b) {
+                        b.state = 2;
+                        p.score++;
+                        p.settleStreak++;
+                        sfx.play('berry', p.settleStreak); 
+                        this.spawnEffect(p.x + 12, p.y + 12, COLORS.berry, 8);
+                        this.spawnRipple(p.x + 12, p.y + 12);
+                    }
                 }
+            } else {
+                p.settleStreak = 0; 
             }
         } else {
-            if (!p.grounded && p.followingBerries.length === 0) {
+             if (!p.grounded && p.followingBerries.length === 0) {
                  p.settleStreak = 0;
                  p.settleTimer = 0;
             }
+        }
+
+        // Snapshot Trail Logic
+        if (p.isDashing) {
+            if (Math.random() > 0.2) {
+                p.trail.push({
+                    x: p.x, y: p.y, 
+                    alpha: 0.8, sprite: true, frame: { faceDir: p.faceDir, sx: p.sx, sy: p.sy }
+                });
+            }
+        }
+        for(let i = p.trail.length - 1; i >= 0; i--) {
+            p.trail[i].alpha -= 0.1;
+            if (p.trail[i].alpha <= 0) p.trail.splice(i, 1);
         }
 
         p.sx += (1 - p.sx) * 15 * dt;
@@ -801,7 +789,7 @@ export class GameEngine {
     }
 
     // --- CORE PHYSICS SUB-STEP ---
-    updatePhysicsSubStep(dt: number, input: { dir: number, jump: boolean, dash: boolean }) {
+    updatePhysicsSubStep(dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
         const p = this.player;
 
         if (p.jumpBuffer > 0 && p.wallBounceTimer > 0) {
@@ -831,8 +819,10 @@ export class GameEngine {
             p.vx = dx * DASH_SPEED; p.vy = dy * DASH_SPEED;
             this.hitStop = 0.05; p.dashDx = dx; p.dashDy = dy;
             p.sx = 0.6; p.sy = 1.4; sfx.play('dash'); this.shake = 6;
-            this.vibrate(15); // Haptic
+            this.vibrate(15); 
             p.dashBuffer = 0; 
+            p.trail = []; 
+            p.moveTimer = 0; // Reset movement accel on dash
         }
 
         if (p.isDashing) {
@@ -845,10 +835,55 @@ export class GameEngine {
             if (p.wallJumpTimer > 0) inputX = 0;
             if (inputX !== 0) p.faceDir = inputX;
 
-            let accel = p.grounded ? 30 : 18;
-            if (Math.abs(p.vx) > DASH_SPEED) accel = 2; 
-            if (p.wallJumpTimer <= 0) p.vx += (inputX * 320 - p.vx) * accel * dt;
+            // Custom Curve Logic
+            if (inputX !== 0) {
+                // Acceleration: Ease-In (Slow then Fast)
+                // If changing direction or starting from stop, reset timer
+                if (Math.sign(inputX) !== Math.sign(p.vx) && p.vx !== 0) {
+                    p.moveTimer = 0;
+                    p.vx = 0; // Instant turn snap for better feel, or let it slide? 
+                    // Let's reset acceleration curve but keep momentum if needed. 
+                    // To follow the prompt "slow start", we should probably reset timer.
+                }
+                
+                p.moveTimer += dt;
+                const t = Math.min(p.moveTimer / ACCEL_TIME, 1.0);
+                
+                // Curve: t^2 (Quadratic Ease-In)
+                const speedFactor = t * t;
+                const targetSpeed = MAX_SPEED * speedFactor * inputX;
+                
+                // Only override velocity if we are "accelerating" up to max speed.
+                // If external forces (springs) pushed us faster, don't clamp instantly.
+                if (Math.abs(p.vx) <= MAX_SPEED) {
+                     p.vx = targetSpeed;
+                } else {
+                     // We are moving faster than max speed (e.g. spring), apply friction
+                     const f = Math.pow(0.02, dt); 
+                     p.vx += (targetSpeed - p.vx) * (1-f);
+                }
+
+            } else {
+                // Deceleration: Fast then Slow (Exponential Decay)
+                p.moveTimer = 0;
+                // We want to drop from MAX_SPEED to ~0 in DECEL_TIME (48ms)
+                // Using exponential decay: vx *= friction^dt
+                // Let's approximate: reduce to 1% speed in DECEL_TIME
+                // 0.01 = base ^ 0.048 => base = 0.01^(1/0.048) approx 1e-42? No.
+                // Logic: vx = vx * Math.pow(rate, dt);
+                // To effectively stop in 48ms, we need a very strong friction.
+                const stopFriction = Math.pow(0.001, dt / DECEL_TIME); // Reduces to 0.1% in 48ms
+                p.vx *= stopFriction;
+                if (Math.abs(p.vx) < 5) p.vx = 0;
+            }
+            
+            // Gravity
             p.vy += GRAVITY * dt;
+
+            // Variable Jump Height / Short Hop
+            if (p.vy < 0 && !input.jumpHeld) {
+                p.vy *= 0.92;
+            }
         }
 
         if (!p.isDashing) {
@@ -892,11 +927,14 @@ export class GameEngine {
                 const overlapLeft = (p.x + p.w) - s.x;
                 const overlapRight = (s.x + s.w) - p.x;
                 
-                if (overlapLeft < 10) {
-                    p.x = s.x - p.w - 0.1; 
-                } else if (overlapRight < 10) {
-                    p.x = s.x + s.w + 0.1; 
+                // CORNER CORRECTION (Y-Axis) - 12px Tolerance
+                if (overlapLeft < 12) {
+                     p.x = s.x - p.w - 0.1; // Push out left
+                     // DO NOT STOP Y here, allow slide
+                } else if (overlapRight < 12) {
+                     p.x = s.x + s.w + 0.1; // Push out right
                 } else {
+                    // Solid collision
                     if (p.vy > 0) {
                         p.y = s.y - p.h;
                         p.vy = 0;
@@ -914,232 +952,237 @@ export class GameEngine {
         }
     }
 
-    checkWallOverlap(offset: number): boolean {
-        const p = this.player;
-        const rect = { x: p.x + offset, y: p.y, w: p.w, h: p.h };
-        for (const s of this.solids) {
-            if (this.AABB(rect, s)) return true;
-        }
-        return false;
-    }
-
     die() {
         if (this.state === GameState.DYING) return;
         this.state = GameState.DYING;
+        
+        // Stop the final timer immediately
+        this.player.endTime = Date.now();
+        this.onGameOver(this.player.highestY, this.player.score, this.player.highestY > this.highScore, this.player.endTime - this.player.startTime);
+        
         sfx.play('death');
+        this.shake = 10;
         this.vibrate(200);
         
         this.deathRipple.active = true;
-        this.deathRipple.x = this.player.x + this.player.w / 2;
-        this.deathRipple.y = this.player.y + this.player.h / 2;
+        this.deathRipple.x = this.player.x + 12;
+        this.deathRipple.y = this.player.y + 12;
         this.deathRipple.r = 0;
-        this.deathRipple.maxR = Math.max(VIEW_WIDTH, this.viewHeight) * 1.5;
-        this.deathRipple.color = '#fff';
-    }
-
-    draw() {
-        const ctx = this.ctx;
-        const width = VIEW_WIDTH;
-        const height = this.viewHeight;
-
-        // Clear and Draw Background
-        const r = Math.round(this.currentBg[0]);
-        const g = Math.round(this.currentBg[1]);
-        const b = Math.round(this.currentBg[2]);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(0, 0, width, height);
-
-        if (this.bgImg) {
-            const bgY = (this.cameraY * 0.3) % 960;
-            ctx.drawImage(this.bgImg, 0, -bgY, width, 960);
-            if (-bgY + 960 < height) {
-                ctx.drawImage(this.bgImg, 0, -bgY + 960, width, 960);
-            }
-        }
-
-        ctx.save();
         
-        // Camera & Shake
-        let shakeX = 0, shakeY = 0;
-        if (this.shake > 0) {
-            shakeX = (Math.random() - 0.5) * this.shake;
-            shakeY = (Math.random() - 0.5) * this.shake;
-            this.shake *= 0.9;
-            if (this.shake < 0.5) this.shake = 0;
+        // Match dash state color (Pale versions)
+        if (this.player.isDashing) {
+             this.deathRipple.color = '#ffffff'; // White
+        } else if (this.player.canDash) {
+             this.deathRipple.color = '#ff80a6'; // Pale Red
+        } else {
+             this.deathRipple.color = '#8cd5ff'; // Pale Blue
         }
-        ctx.translate(0, -this.cameraY);
-        ctx.translate(shakeX, shakeY);
-
-        // Solids
-        for (const s of this.solids) {
-             if (this.tilesetImg) {
-                 this.drawTiledRect(s.x, s.y, s.w, s.h);
-             } else {
-                 ctx.fillStyle = COLORS.rock;
-                 ctx.fillRect(s.x, s.y, s.w, s.h);
-             }
-        }
-
-        // Platforms
-        for (const p of this.platforms) {
-            if (this.platformImg) {
-                const parts = Math.ceil(p.w / TILE_SIZE);
-                for(let i=0; i<parts; i++) {
-                     // Clip the last tile if needed
-                     const drawW = Math.min(TILE_SIZE, p.w - i*TILE_SIZE);
-                     ctx.drawImage(this.platformImg, 0, 0, drawW, 14, p.x + i*TILE_SIZE, p.y, drawW, 14);
-                }
-            } else {
-                ctx.fillStyle = '#5c4436';
-                ctx.fillRect(p.x, p.y, p.w, p.h);
-            }
-        }
-
-        // Springs
-        for (const s of this.springs) {
-            if (this.springImg) {
-                ctx.save();
-                ctx.translate(s.x + s.w/2, s.y + s.h/2);
-                if (s.dir === 'left') ctx.rotate(Math.PI/2);
-                if (s.dir === 'right') ctx.rotate(-Math.PI/2);
-                
-                let scaleY = 1;
-                if (s.animTimer > 0) {
-                    scaleY = 1 + Math.sin(s.animTimer * 20) * 0.5;
-                }
-                ctx.scale(1, scaleY);
-                ctx.drawImage(this.springImg, -12, -12);
-                ctx.restore();
-            } else {
-                ctx.fillStyle = 'red';
-                ctx.fillRect(s.x, s.y, s.w, s.h);
-            }
-        }
-
-        // Crystals
-        for (const c of this.crystals) {
-            if (c.respawnTimer <= 0) {
-                ctx.fillStyle = COLORS.crystal;
-                ctx.beginPath();
-                ctx.arc(c.x + 15, c.y + 15, 8, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Glow
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.beginPath();
-                ctx.arc(c.x + 15, c.y + 15, 12 + Math.sin(Date.now()/200)*3, 0, Math.PI * 2);
-                ctx.fill();
-            } else {
-                 ctx.fillStyle = '#444';
-                 ctx.beginPath();
-                 ctx.arc(c.x + 15, c.y + 15, 4, 0, Math.PI*2);
-                 ctx.fill();
-            }
-        }
-
-        // Berries
-        for (const b of this.berries) {
-            if (b.state === 2) continue;
-            let bx = b.x;
-            let by = b.y;
-            if (b.state === 0) by = b.baseY + Math.sin(Date.now() / 300) * 5;
-
-            // Wings if following
-            if (b.state === 1) {
-                ctx.fillStyle = '#fff';
-                const flap = Math.sin(Date.now() / 50) * 5;
-                // Left Wing
-                ctx.beginPath(); ctx.moveTo(bx + 10, by + 10); ctx.lineTo(bx - 5, by - 5 + flap); ctx.lineTo(bx + 5, by + 15); ctx.fill();
-                // Right Wing
-                ctx.beginPath(); ctx.moveTo(bx + 20, by + 10); ctx.lineTo(bx + 35, by - 5 + flap); ctx.lineTo(bx + 25, by + 15); ctx.fill();
-            }
-            
-            ctx.fillStyle = COLORS.berry;
-            ctx.beginPath(); ctx.arc(bx + 15, by + 15, 10, 0, Math.PI * 2); ctx.fill();
-        }
-
-        // Particles
-        for (const p of this.particles) {
-            ctx.fillStyle = p.color;
-            ctx.globalAlpha = p.life;
-            ctx.fillRect(p.x, p.y, p.size, p.size);
-            ctx.globalAlpha = 1;
-        }
-
-        // Ripples
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        for (const r of this.ripples) {
-            ctx.globalAlpha = r.alpha;
-            ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI*2); ctx.stroke();
-            ctx.globalAlpha = 1;
-        }
-
-        // Player
-        if (this.state !== GameState.DYING) {
-            this.drawPlayer(ctx);
-        } else if (this.deathRipple.active) {
-            ctx.fillStyle = this.deathRipple.color;
-            ctx.beginPath(); ctx.arc(this.deathRipple.x, this.deathRipple.y, this.deathRipple.r, 0, Math.PI*2); ctx.fill();
-            
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.beginPath(); ctx.arc(this.deathRipple.x, this.deathRipple.y, Math.max(0, this.deathRipple.r - 40), 0, Math.PI*2); ctx.fill();
-            ctx.globalCompositeOperation = 'source-over';
-        }
-
-        // Snow
-        ctx.fillStyle = '#fff';
-        for (const s of this.snow) {
-            ctx.fillRect(s.x, s.y, s.size, s.size);
-        }
-
-        ctx.restore();
     }
 
     drawTiledRect(x: number, y: number, w: number, h: number) {
         if (!this.tilesetImg) return;
         const ctx = this.ctx;
+        const TS = TILE_SIZE;
         
-        const cols = Math.ceil(w / TILE_SIZE);
-        const rows = Math.ceil(h / TILE_SIZE);
-        
-        for(let r=0; r<rows; r++) {
-            for(let c=0; c<cols; c++) {
-                const dw = Math.min(TILE_SIZE, w - c*TILE_SIZE);
-                const dh = Math.min(TILE_SIZE, h - r*TILE_SIZE);
-                // Use the top-left 24x24 as the texture
-                ctx.drawImage(this.tilesetImg, 0, 0, dw, dh, x + c*TILE_SIZE, y + r*TILE_SIZE, dw, dh);
+        for(let cx = x; cx < x + w; cx += TS) {
+            for(let cy = y; cy < y + h; cy += TS) {
+                const u = this.isSolidAt(cx, cy - TS);
+                const d = this.isSolidAt(cx, cy + TS);
+                const l = this.isSolidAt(cx - TS, cy);
+                const r = this.isSolidAt(cx + TS, cy);
+
+                let srcX = 24; 
+                if (!l && r) srcX = 0; 
+                else if (l && !r) srcX = 48;
+                else if (!l && !r) srcX = 72;
+
+                let srcY = 24; 
+                if (!u) srcY = 0;
+                else if (!d) srcY = 48;
+                
+                if (h <= TS) srcY = 72; 
+
+                ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, Math.floor(cx), Math.floor(cy), TS, TS);
             }
         }
-        
-        // Draw snow cap
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(x, y, w, 4);
     }
 
     drawPlayer(ctx: CanvasRenderingContext2D) {
         const p = this.player;
         ctx.save();
+        // Fix floating: Align body bottom (y+6) to hitbox bottom (y+12)
+        // Hitbox is 24x24. Center is 12,12.
         ctx.translate(Math.floor(p.x + p.w / 2), Math.floor(p.y + p.h / 2));
         ctx.scale(p.sx * p.faceDir, p.sy);
 
         const color = p.isDashing ? COLORS.hairDash : (p.canDash ? COLORS.hairIdle : COLORS.hairNoDash);
-        if (p.flashTimer > 0 && Math.floor(Date.now() / 50) % 2 === 0) ctx.fillStyle = '#fff';
+        if (p.flashTimer > 0) ctx.fillStyle = '#ffffff';
         else ctx.fillStyle = color;
 
-        // Hair
-        ctx.fillRect(-10, -10, 20, 20); // Placeholder hair block
-
-        // Body
-        ctx.fillStyle = p.flashTimer > 0 ? '#fff' : color;
-        ctx.fillRect(-6, -6, 12, 12);
+        // Hair (-10, -8, 20, 20)
+        ctx.fillRect(-10, -8, 20, 20); 
+        
+        // Body (-6, 0, 12, 12) -> Feet at 12
+        ctx.fillStyle = p.flashTimer > 0 ? '#ffffff' : color;
+        ctx.fillRect(-6, 0, 12, 12); 
         
         // Eyes
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(2, -4, 4, 4);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(4, -2, 2, 2);
+        if (p.blinkTimer <= 0) {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(1, -2, 2, 4); 
+            ctx.fillRect(5, -2, 2, 4); 
+        }
 
         ctx.restore();
+    }
+
+    draw() {
+        const ctx = this.ctx;
+        const p = this.player;
+
+        // Clear
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Shake
+        ctx.save();
+        if (this.shake > 0) {
+            const dx = (Math.random() - 0.5) * this.shake * 2;
+            const dy = (Math.random() - 0.5) * this.shake * 2;
+            ctx.translate(Math.floor(dx), Math.floor(dy));
+            this.shake = Math.max(0, this.shake - 1); // Decay shake
+        }
+
+        // Parallax BG
+        if (this.bgImg) {
+            // The SVG is 552x960. Tile it vertically.
+            const bgY = Math.floor(this.cameraY * 0.5) % 960;
+            ctx.drawImage(this.bgImg, 0, -bgY, VIEW_WIDTH, 960);
+            ctx.drawImage(this.bgImg, 0, -bgY + 960, VIEW_WIDTH, 960);
+            ctx.drawImage(this.bgImg, 0, -bgY - 960, VIEW_WIDTH, 960);
+        }
+
+        // Camera Transform
+        ctx.translate(0, Math.floor(-this.cameraY));
+
+        // Draw Solids
+        this.solids.forEach(s => {
+            this.drawTiledRect(s.x, s.y, s.w, s.h);
+        });
+
+        // Draw Platforms
+        this.platforms.forEach(pl => {
+            if (this.platformImg) {
+                 for(let i=0; i<pl.w; i+=24) {
+                     ctx.drawImage(this.platformImg, pl.x + i, pl.y, 24, 14);
+                 }
+            } else {
+                ctx.fillStyle = COLORS.rock;
+                ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+            }
+        });
+
+        // Springs
+        this.springs.forEach(s => {
+             if (this.springImg) {
+                 ctx.save();
+                 ctx.translate(s.x + 12, s.y + 12);
+                 if (s.dir === 'left') ctx.rotate(-Math.PI/2);
+                 if (s.dir === 'right') ctx.rotate(Math.PI/2);
+                 
+                 // Animation compression
+                 const scale = 1 + (s.animTimer > 0 ? 0.4 : 0);
+                 const off = s.animTimer > 0 ? -4 : 0;
+                 
+                 ctx.drawImage(this.springImg, -12, -12 + off, 24, 24);
+                 ctx.restore();
+             }
+        });
+
+        // Crystals
+        this.crystals.forEach(c => {
+            if (c.respawnTimer > 0) return;
+            // Bobbing
+            const bob = Math.sin(Date.now() / 200) * 2;
+            ctx.fillStyle = COLORS.crystal;
+            // Draw Diamond shape
+            const cx = c.x + c.w/2;
+            const cy = c.y + c.h/2 + bob;
+            
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - 8);
+            ctx.lineTo(cx + 8, cy);
+            ctx.lineTo(cx, cy + 8);
+            ctx.lineTo(cx - 8, cy);
+            ctx.fill();
+            
+            // Glow
+            ctx.globalAlpha = 0.3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 12 + Math.sin(Date.now()/100)*2, 0, Math.PI*2);
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+        });
+
+        // Berries
+        this.berries.forEach(b => {
+             if (b.state === 2) return;
+             if (this.berryImg) {
+                 const bob = b.state === 0 ? Math.sin(Date.now()/250) * 3 : 0;
+                 ctx.drawImage(this.berryImg, b.x, b.y + bob, 30, 30);
+             }
+        });
+
+        // Player Trail
+        p.trail.forEach(t => {
+            ctx.save();
+            ctx.globalAlpha = t.alpha * 0.5;
+            ctx.translate(Math.floor(t.x + 12), Math.floor(t.y + 12));
+            ctx.scale(t.frame.sx * t.frame.faceDir, t.frame.sy);
+            ctx.fillStyle = COLORS.hairDash;
+            ctx.fillRect(-10, -8, 20, 20); // Match player hair
+            ctx.fillRect(-6, 0, 12, 12);   // Match player body
+            ctx.restore();
+        });
+        ctx.globalAlpha = 1;
+
+        // Player
+        if (this.state !== GameState.GAMEOVER && this.state !== GameState.DYING) {
+             this.drawPlayer(ctx);
+        }
+
+        // Particles
+        this.particles.forEach(pt => {
+             ctx.fillStyle = pt.color;
+             ctx.fillRect(Math.floor(pt.x), Math.floor(pt.y), Math.floor(pt.size), Math.floor(pt.size));
+        });
+
+        // Ripples
+        ctx.lineWidth = 2;
+        this.ripples.forEach(r => {
+             ctx.strokeStyle = `rgba(255, 255, 255, ${r.alpha})`;
+             ctx.beginPath();
+             ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+             ctx.stroke();
+        });
+
+        // Death Ripple
+        if (this.deathRipple.active) {
+            ctx.fillStyle = this.deathRipple.color;
+            ctx.beginPath();
+            ctx.arc(this.deathRipple.x, this.deathRipple.y, this.deathRipple.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Snow (Foreground)
+        ctx.fillStyle = 'white';
+        this.snow.forEach(s => {
+             ctx.globalAlpha = 0.6;
+             ctx.fillRect(Math.floor(s.x), Math.floor(s.y), Math.floor(s.size), Math.floor(s.size));
+        });
+        ctx.globalAlpha = 1;
+
+        ctx.restore(); // Pop Camera
+        ctx.restore(); // Pop Shake
     }
 }
