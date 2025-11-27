@@ -1,5 +1,6 @@
+
 import { GameState, Rect, Platform, Berry, Crystal, Solid, Particle, Spring, TrailPoint } from '../types';
-import { COLORS, CHAPTERS, VIEW_WIDTH, TILE_SIZE, DASH_SPEED } from '../constants';
+import { COLORS, CHAPTERS, VIEW_WIDTH, TILE_SIZE, DASH_SPEED, JUMP_BUFFER_TIME } from '../constants';
 import { sfx } from '../services/audioService';
 import { Physics } from './systems/Physics';
 import { LevelGenerator } from './systems/LevelGenerator';
@@ -141,6 +142,9 @@ export class GameEngine {
         this.player.startTime = Date.now();
         this.player.endTime = 0;
         
+        const saved = localStorage.getItem('dc_highscore');
+        this.highScore = saved ? parseInt(saved) : 0;
+        
         this.deathRipple.active = false;
         this.cameraY = -this.viewHeight / 2;
         this.state = GameState.PLAYING;
@@ -235,16 +239,21 @@ export class GameEngine {
         if(p.springTimer > 0) p.springTimer -= dt;
 
         if (input.dash && !p.canDash) {
-            p.dashBuffer = 0.08; 
+            p.dashBuffer = JUMP_BUFFER_TIME; // 80ms buffer
         }
 
         // Camera Follow
-        const targetY = p.y - this.viewHeight * 0.25; // Lift camera higher
+        const targetY = p.y - this.viewHeight * 0.25; 
         if (targetY < this.cameraY) {
             this.cameraY += (targetY - this.cameraY) * 0.15;
         }
 
-        const h = Math.floor(Math.abs(p.y) / 10);
+        // Height Calculation: 1 Tile (24px) = 1 Meter
+        // Baseline is 150 (Ground Level). Up is Negative.
+        // Height = (150 - currentY) / 24.
+        const START_Y = 150;
+        const h = Math.floor(Math.max(0, (START_Y - p.y) / TILE_SIZE));
+        
         const isRecord = this.highScore > 0 && h > this.highScore;
         
         if (h > p.highestY) {
@@ -255,9 +264,9 @@ export class GameEngine {
                  this.onMilestone("NEW RECORD!!", true);
                  p.hasTriggeredRecord = true;
             }
-            if (h >= p.lastMilestone + 1000) {
-                p.lastMilestone = Math.floor(h / 1000) * 1000;
-                this.onMilestone(p.lastMilestone + "m", false);
+            if (h >= p.lastMilestone + 500) {
+                p.lastMilestone = Math.floor(h / 500) * 500;
+                this.onMilestone(p.lastMilestone + "M", false);
                 this.setChapter(p.lastMilestone);
             }
         } else {
@@ -270,7 +279,7 @@ export class GameEngine {
         }
 
         if (p.grounded) p.coyoteTimer = 0.1; else p.coyoteTimer -= dt;
-        if (input.jump) p.jumpBuffer = 0.15;
+        if (input.jump) p.jumpBuffer = JUMP_BUFFER_TIME; // 80ms
         if (p.jumpBuffer > 0) p.jumpBuffer -= dt;
         if (p.wallJumpTimer > 0) p.wallJumpTimer -= dt;
 
@@ -289,6 +298,7 @@ export class GameEngine {
         
         while(remainingDt > 0) {
             const step = Math.min(remainingDt, MAX_STEP);
+            // Dash triggers if dash pressed OR buffered
             const effectiveDash = input.dash || (p.dashBuffer > 0 && p.canDash);
             this.physics.update(this, step, { ...input, dash: effectiveDash });
             remainingDt -= step;
@@ -371,12 +381,10 @@ export class GameEngine {
         p.history.unshift({ x: p.x, y: p.y });
         if (p.history.length > 300) p.history.length = 300;
         
-        // Procedural Gen Trigger
         while (this.levelGen.spawnY > this.cameraY - 200) {
             this.levelGen.generate(this.solids, this.platforms, this.crystals, this.berries, this.springs);
         }
         
-        // Cleanup offscreen
         const dl = this.cameraY + this.viewHeight + 100;
         this.platforms = this.platforms.filter(o => o.y < dl);
         this.solids = this.solids.filter(o => o.y < dl);
@@ -384,7 +392,6 @@ export class GameEngine {
         this.berries = this.berries.filter(o => o.state !== 2 && (o.y < dl || o.state === 1));
         this.crystals = this.crystals.filter(o => o.y < dl);
         
-        // Particle & Ripple Updates
         this.crystals.forEach(c => {
              const o = c.respawnTimer;
              if (c.respawnTimer > 0) {
@@ -392,8 +399,8 @@ export class GameEngine {
                  if (c.respawnTimer < 0.5 && Math.random() < 0.3) {
                      const angle = Math.random() * Math.PI * 2;
                      const dist = 25;
-                     const px = (c.x + 15) + Math.cos(angle) * dist;
-                     const py = (c.y + 15) + Math.sin(angle) * dist;
+                     const px = (c.x + c.w/2) + Math.cos(angle) * dist;
+                     const py = (c.y + c.h/2) + Math.sin(angle) * dist;
                      this.particles.push({
                          x: px, y: py,
                          vx: -Math.cos(angle) * 100, 
@@ -406,8 +413,8 @@ export class GameEngine {
              }
              if (o > 0 && c.respawnTimer <= 0) {
                  sfx.play('respawn');
-                 this.physics.spawnRipple(this, c.x + 15, c.y + 15);
-                 this.physics.spawnEffect(this, c.x + 15, c.y + 15, COLORS.crystal, 12);
+                 this.physics.spawnRipple(this, c.x + c.w/2, c.y + c.h/2);
+                 this.physics.spawnEffect(this, c.x + c.w/2, c.y + c.h/2, COLORS.crystal, 12);
              }
         });
         

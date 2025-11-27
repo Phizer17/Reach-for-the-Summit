@@ -7,7 +7,7 @@ const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const requestRef = useRef<number>(0);
-  const previousTimeRef = useRef<number>(0);
+  const lastFrameTimeRef = useRef<number>(0);
 
   // React State for UI
   const [gameState, setGameState] = useState<GameState>(GameState.TITLE);
@@ -89,6 +89,11 @@ const App = () => {
     
     const sec = time / 1000;
     const speed = sec > 0 ? (h / sec).toFixed(1) : "0";
+    
+    if (newRecord) {
+        localStorage.setItem('dc_highscore', h.toString());
+        setHighScore(h);
+    }
 
     setGameOverStats({ height: h, berries: b, rank, time: formatTime(time), speed });
     setGameState(GameState.GAMEOVER);
@@ -119,25 +124,34 @@ const App = () => {
   };
 
   const animate = (time: number) => {
-    if (previousTimeRef.current !== undefined) {
-      let dt = (time - previousTimeRef.current) / 1000;
-      if (dt > 0.1) dt = 0.1; 
-      
-      if (engineRef.current) {
-        engineRef.current.update(dt, {
-          dir: inputRef.current.dir,
-          jump: inputRef.current.jump,
-          dash: inputRef.current.dash,
-          jumpHeld: inputRef.current.jumpHeld
-        });
-        engineRef.current.draw();
-        
-        if (inputRef.current.jump) inputRef.current.jump = false;
-        if (inputRef.current.dash) inputRef.current.dash = false;
-      }
-    }
-    previousTimeRef.current = time;
     requestRef.current = requestAnimationFrame(animate);
+    
+    // FPS Management:
+    // We want to cap at ~60FPS, but not aggressively skip frames on 60Hz screens.
+    // 12ms threshold allows 144Hz screens (approx 7ms frame time) to skip every other frame,
+    // while 60Hz screens (approx 16.6ms) will pass the check every frame.
+    const delta = time - lastFrameTimeRef.current;
+    if (delta < 12) return; 
+    
+    lastFrameTimeRef.current = time;
+
+    // Convert to seconds, cap at 0.06 (approx 15fps) to prevent physics explosions
+    let dt = delta / 1000;
+    if (dt > 0.06) dt = 0.06;
+      
+    if (engineRef.current) {
+      engineRef.current.update(dt, {
+        dir: inputRef.current.dir,
+        jump: inputRef.current.jump,
+        dash: inputRef.current.dash,
+        jumpHeld: inputRef.current.jumpHeld
+      });
+      engineRef.current.draw();
+      
+      // Reset one-shot inputs
+      if (inputRef.current.jump) inputRef.current.jump = false;
+      if (inputRef.current.dash) inputRef.current.dash = false;
+    }
   };
 
   const togglePause = useCallback(() => {
@@ -217,6 +231,7 @@ const App = () => {
           (h, b, r, t) => callbacksRef.current.onGameOver(h, b, r, t),
           (t, r) => callbacksRef.current.onMilestone(t, r)
       );
+      lastFrameTimeRef.current = performance.now();
       requestRef.current = requestAnimationFrame(animate);
     }
 
@@ -357,7 +372,7 @@ const App = () => {
                       <div className={`bg-black/50 border-2 rounded-full px-4 py-1 flex items-center gap-2 transition-colors duration-300 ${
                           isRecordRun ? 'border-yellow-400 text-yellow-300 shadow-[0_0_10px_rgba(255,215,0,0.5)]' : 'border-white/20 text-white'
                       }`}>
-                         <span>▲</span> <span>{hudHeight}m</span>
+                         <span>▲</span> <span>{hudHeight}M</span>
                       </div>
                    </div>
                    <div className="flex items-center gap-2 relative mt-1">
@@ -415,7 +430,7 @@ const App = () => {
             <h1 className="text-4xl md:text-5xl font-bold text-center mb-2 drop-shadow-md">
               Reach for the <span className="text-sky-400">Summit</span>
             </h1>
-            <div className="text-yellow-400 font-bold text-xl mb-8">BEST: {highScore}m</div>
+            <div className="text-yellow-400 font-bold text-xl mb-8">BEST: {highScore}M</div>
             <div className="text-gray-400 text-center text-sm mb-8 space-y-2">
               <p>[Arrows] Move</p>
               <p>[K/Z] Jump • [X/J] Dash</p>
@@ -427,7 +442,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_47_polish_3</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_48_polish_4</div>
           </div>
         )}
 
@@ -468,7 +483,7 @@ const App = () => {
               <h2 className="text-4xl font-bold text-red-500 text-center mb-6 drop-shadow-sm">GAME OVER</h2>
               <div className="grid grid-cols-2 gap-4 mb-4 text-sm text-gray-400">
                   <div className="border-b border-dashed border-gray-600 pb-1">Height</div>
-                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.height}m</div>
+                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.height}M</div>
                   
                   <div className="border-b border-dashed border-gray-600 pb-1">Time</div>
                   <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.time}</div>

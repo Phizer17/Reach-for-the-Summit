@@ -1,3 +1,4 @@
+
 import { GameEngine } from '../GameEngine';
 import { COLORS, VIEW_WIDTH, TILE_SIZE } from '../../constants';
 import { GameState } from '../../types';
@@ -46,12 +47,12 @@ export class Renderer {
         const bgSvg = `<svg width="552" height="960" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sky" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#111221"/><stop offset="100%" stop-color="#282638"/></linearGradient></defs><rect width="552" height="960" fill="url(#sky)"/><path d="M0 960 L0 800 L100 700 L250 850 L400 720 L552 800 L552 960 Z" fill="#1b1b29"/><g fill="#fff" opacity="0.4"><circle cx="50" cy="100" r="1"/><circle cx="200" cy="50" r="1.5"/><circle cx="450" cy="150" r="1"/><circle cx="300" cy="300" r="1"/><circle cx="100" cy="400" r="1"/></g></svg>`.trim();
         this.bgImg = new Image(); this.bgImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(bgSvg);
 
-        // Berry (Red)
-        const berrySvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 21 C17 19 20 14 20 10 C20 7 18 5 12 5 C6 5 4 7 4 10 C4 14 7 19 12 21 Z" fill="${COLORS.berry}"/><circle cx="8" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="12" cy="13" r="1" fill="#fff" opacity="0.6"/><circle cx="8" cy="16" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="16" r="1" fill="#fff" opacity="0.6"/><path d="M12 5 L9 3 L8 6 L12 8 L16 6 L15 3 Z" fill="#00e436"/></svg>`.trim();
+        // Berry (Red) - REDUCED SPOTS TO 3
+        const berrySvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 21 C17 19 20 14 20 10 C20 7 18 5 12 5 C6 5 4 7 4 10 C4 14 7 19 12 21 Z" fill="${COLORS.berry}"/><circle cx="8" cy="10" r="1" fill="#fff" opacity="0.6"/><circle cx="14" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="11" cy="14" r="1" fill="#fff" opacity="0.6"/><path d="M12 5 L9 3 L8 6 L12 8 L16 6 L15 3 Z" fill="#00e436"/></svg>`.trim();
         this.berryImg = new Image(); this.berryImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(berrySvg);
 
-        // Crystal
-        const crystalSvg = `<svg width="30" height="30" xmlns="http://www.w3.org/2000/svg"><path d="M15 2 L28 15 L15 28 L2 15 Z" fill="#00e436" opacity="0.8"/><path d="M15 6 L24 15 L15 24 L6 15 Z" fill="#80ff9d" opacity="0.6"/><path d="M15 2 L28 15 L15 28 L2 15 Z" stroke="#fff" stroke-width="2" fill="none" opacity="0.5"/></svg>`.trim();
+        // Crystal (Resized to 22x22 visually in a 22x22 box)
+        const crystalSvg = `<svg width="22" height="22" xmlns="http://www.w3.org/2000/svg"><path d="M11 2 L20 11 L11 20 L2 11 Z" fill="#00e436" opacity="0.8"/><path d="M11 5 L17 11 L11 17 L5 11 Z" fill="#80ff9d" opacity="0.6"/><path d="M11 2 L20 11 L11 20 L2 11 Z" stroke="#fff" stroke-width="2" fill="none" opacity="0.5"/></svg>`.trim();
         this.crystalImg = new Image(); this.crystalImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(crystalSvg);
     }
 
@@ -110,8 +111,8 @@ export class Renderer {
         ctx.save();
         ctx.translate(Math.floor(p.x + p.w / 2), Math.floor(p.y + p.h / 2));
         
-        // Draw Dash Direction Indicator
-        if (p.canDash && !p.isDashing && game.state === GameState.PLAYING) {
+        // Draw Dash Direction Indicator (ALWAYS VISIBLE)
+        if (game.state === GameState.PLAYING) {
              ctx.save();
              let dx = game.lastInputDir;
              let angle = -Math.PI / 2; 
@@ -124,8 +125,11 @@ export class Renderer {
              ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
              ctx.rotate(angle + Math.PI / 2);
              
-             ctx.fillStyle = '#ffffff';
-             ctx.globalAlpha = 0.6;
+             // Color indicates dash readiness
+             // If dashing, show white; if can dash, white; if no dash, blueish
+             // Per request: Always show.
+             ctx.fillStyle = p.canDash ? '#ffffff' : '#8cd5ff';
+             ctx.globalAlpha = p.isDashing ? 0.3 : 0.6; // Fade out slightly if actually dashing
              ctx.beginPath();
              ctx.moveTo(0, -4);
              ctx.lineTo(4, 4);
@@ -194,7 +198,7 @@ export class Renderer {
 
         // Collision Sensors (Visualizing the "Trunk" check)
         ctx.strokeStyle = 'yellow';
-        ctx.strokeRect(p.x, p.y + 8, p.w, p.h - 16);
+        ctx.strokeRect(p.x, p.y + 7, p.w, p.h - 14);
 
         ctx.restore();
         
@@ -240,6 +244,26 @@ export class Renderer {
 
         // Camera Transform
         ctx.translate(0, Math.floor(-game.cameraY));
+
+        // Draw High Score Line
+        if (game.highScore > 0) {
+            const lineY = -(game.highScore * TILE_SIZE); // Adjusted to match new height calc
+            if (lineY > game.cameraY && lineY < game.cameraY + game.viewHeight) {
+                ctx.save();
+                ctx.strokeStyle = '#FFD700';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([10, 10]);
+                ctx.beginPath();
+                ctx.moveTo(0, lineY);
+                ctx.lineTo(VIEW_WIDTH, lineY);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#FFD700';
+                ctx.font = 'bold 16px monospace';
+                ctx.fillText(`BEST ${game.highScore}M`, 10, lineY - 5);
+                ctx.restore();
+            }
+        }
 
         // Draw Solids
         game.solids.forEach(s => {
@@ -295,16 +319,16 @@ export class Renderer {
             // Bobbing
             const bob = Math.sin(Date.now() / 500) * 2; 
             ctx.fillStyle = COLORS.crystal;
-            const cx = c.x + c.w/2;
-            const cy = c.y + c.h/2 + bob;
-            ctx.beginPath();
-            ctx.moveTo(cx, cy - 8);
-            ctx.lineTo(cx + 8, cy);
-            ctx.lineTo(cx, cy + 8);
-            ctx.lineTo(cx - 8, cy);
-            ctx.fill();
+            
+            // Draw resized crystal (22x22)
+            if (this.crystalImg) {
+                 ctx.drawImage(this.crystalImg, c.x, c.y + bob, 22, 22);
+            }
+            
             // Glow
             ctx.globalAlpha = 0.3;
+            const cx = c.x + c.w/2;
+            const cy = c.y + c.h/2 + bob;
             ctx.beginPath();
             ctx.arc(cx, cy, 12 + Math.sin(Date.now()/100)*2, 0, Math.PI*2);
             ctx.fill();

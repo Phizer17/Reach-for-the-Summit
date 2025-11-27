@@ -1,3 +1,4 @@
+
 export const VIEW_WIDTH = 480; // Reduced to 20 tiles for better mobile visibility
 export const TILE_SIZE = 24;
 
@@ -18,10 +19,11 @@ export const WALL_JUMP_Y = -750;
 export const DASH_TIME = 0.10; 
 
 // Parabolic Arc Tuning
-// Goal: Apex ~3 tiles (72px) up, Land ~5 tiles (120px) away at +2 tiles (48px) high
 export const SPRING_SPEED_Y = -1050; 
-export const SPRING_SPEED_X = 400; // Reduced base speed, relying on low friction
-export const SPRING_SIDE_LIFT = -600; // Tuned for 3-tile apex
+export const SPRING_SPEED_X = 750; // Increased to 750 for stronger push
+export const SPRING_SIDE_LIFT = -900; // Increased lift for better arc
+
+export const JUMP_BUFFER_TIME = 0.08; // 80ms
 
 export const COLORS = {
   bg: '#1d1d2b',

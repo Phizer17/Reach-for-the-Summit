@@ -1,3 +1,4 @@
+
 import { VIEW_WIDTH, TILE_SIZE } from '../../constants';
 import { Platform, Solid, Berry, Crystal, Spring } from '../../types';
 
@@ -103,8 +104,9 @@ export class LevelGenerator {
             const x = minX + Math.random() * (maxX - minX);
             const snappedX = Math.floor(x / TILE_SIZE) * TILE_SIZE;
             
-            if (!this.checkSolidOverlap(snappedX, currentY, 30, 30, solids)) {
-                crystals.push({ x: snappedX - 3, y: currentY - 3, w: 30, h: 30, respawnTimer: 0 });
+            if (!this.checkSolidOverlap(snappedX, currentY, 22, 22, solids)) {
+                // Resize crystal to 22x22 (slightly smaller than tile)
+                crystals.push({ x: snappedX + 1, y: currentY + 1, w: 22, h: 22, respawnTimer: 0 });
                 this.lastWasCrystal = true;
                 return;
             }
