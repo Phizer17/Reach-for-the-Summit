@@ -1,31 +1,24 @@
-
-export const VIEW_WIDTH = 552; // Internal resolution width (scaled by CSS) - Multiple of 24
+export const VIEW_WIDTH = 552; 
 export const TILE_SIZE = 24;
-
-// Physics Tuned for:
-// Max Jump Height: 120px (5 tiles)
-// Total Airtime: 600ms (0.6s)
-// Formula: h = 1/2 * g * t_apex^2  => 120 = 0.5 * g * (0.3)^2 => g = 2666.67
-// v0 = g * t_apex => 2666.67 * 0.3 = 800
 
 export const GRAVITY = 2666; 
 export const JUMP_FORCE = -800; 
+export const MAX_FALL_SPEED = 900; 
 
 export const MAX_SPEED = 320;
-export const ACCEL_TIME = 0.096; // 96ms to max speed
-export const DECEL_TIME = 0.048; // 48ms to stop
+export const ACCEL_TIME = 0.096; 
+export const DECEL_TIME = 0.048; 
 
-export const DASH_SPEED = 1050; // Snappier dash
+export const DASH_SPEED = 1050; 
 export const WALL_SLIDE_SPEED = 150;
-export const WALL_JUMP_X = 650; // Increased to 650 (approx 2.5 tiles with drag)
-export const WALL_JUMP_Y = -750; // Slightly higher to match new gravity
-export const DASH_TIME = 0.10; // Reduced duration to maintain ~105px distance
+export const WALL_JUMP_X = 650; 
+export const WALL_JUMP_Y = -750; 
+export const DASH_TIME = 0.10; 
 
-export const SPRING_SPEED_Y = -1350; // Increased to compensate for higher gravity (was -1050)
-export const SPRING_SPEED_X = 1200;
-export const SPRING_SIDE_LIFT = -450; 
+export const SPRING_SPEED_Y = -1050; 
+export const SPRING_SPEED_X = 2200; 
+export const SPRING_SIDE_LIFT = -900; // Increased for parabolic arc (was -500)
 
-// Colors
 export const COLORS = {
   bg: '#1d1d2b',
   rock: '#5f574f',
@@ -36,6 +29,7 @@ export const COLORS = {
   hairNoDash: '#29adff',
   berry: '#ff004d',
   crystal: '#00e436',
+  ghost: '#888888',
   text: '#fff'
 };
 

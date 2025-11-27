@@ -47,6 +47,7 @@ export interface PlayerState extends Rect {
   dashBuffer: number; 
   blinkTimer: number; 
   moveTimer: number; 
+  springTimer: number; // New: Low friction timer
 }
 
 export interface Platform extends Rect {}

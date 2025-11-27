@@ -22,6 +22,10 @@ const App = () => {
   const [milestone, setMilestone] = useState<{ text: string, active: boolean, isRecord: boolean }>({ text: '', active: false, isRecord: false });
   const [gameOverStats, setGameOverStats] = useState({ height: 0, berries: 0, rank: 'C', time: "00:00", speed: "0" });
   
+  const [homeTransition, setHomeTransition] = useState(false);
+  const [retryTransition, setRetryTransition] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
+
   // Input Highlighting
   const [activeAction, setActiveAction] = useState<{jump: boolean, dash: boolean, left: boolean, right: boolean}>({ jump: false, dash: false, left: false, right: false });
 
@@ -104,6 +108,15 @@ const App = () => {
     callbacksRef.current.onMilestone = handleMilestone;
   });
 
+  // Toggle Debug Mode
+  const toggleDebug = () => {
+      setDebugMode(prev => {
+          const next = !prev;
+          if (engineRef.current) engineRef.current.debug = next;
+          return next;
+      });
+  };
+
   const animate = (time: number) => {
     if (previousTimeRef.current !== undefined) {
       let dt = (time - previousTimeRef.current) / 1000;
@@ -146,6 +159,21 @@ const App = () => {
       setGameState(GameState.PLAYING);
   };
 
+  // Fast transition for Retry
+  const handleRetry = () => {
+      setRetryTransition(true);
+      setTimeout(() => {
+          sfx.init();
+          if (engineRef.current) {
+            engineRef.current.initGame();
+            setGameState(GameState.PLAYING);
+            setHudTimer("00:00.00");
+          }
+          setRetryTransition(false);
+      }, 250); // 250ms fast transition
+  };
+
+  // Direct start without transition (for initial title screen)
   const startGame = () => {
     sfx.init();
     if (engineRef.current) {
@@ -155,16 +183,21 @@ const App = () => {
     }
   };
 
+  // Slow transition for Home
   const toTitle = () => {
-    sfx.init();
-    if (engineRef.current) {
-        engineRef.current.state = GameState.TITLE;
-        engineRef.current.deathRipple.active = false; 
-    }
-    setGameState(GameState.TITLE);
-    const saved = localStorage.getItem('dc_highscore');
-    if (saved) setHighScore(parseInt(saved));
-    setIsRecordRun(false);
+    setHomeTransition(true);
+    setTimeout(() => {
+        sfx.init();
+        if (engineRef.current) {
+            engineRef.current.state = GameState.TITLE;
+            engineRef.current.deathRipple.active = false; 
+        }
+        setGameState(GameState.TITLE);
+        const saved = localStorage.getItem('dc_highscore');
+        if (saved) setHighScore(parseInt(saved));
+        setIsRecordRun(false);
+        setTimeout(() => setHomeTransition(false), 100);
+    }, 500);
   };
 
   // One-time Engine Initialization
@@ -246,14 +279,18 @@ const App = () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('resize', () => engineRef.current?.resize());
+    // Prevent context menu globally for better mobile experience
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('contextmenu', (e) => e.preventDefault());
     };
   }, [togglePause]);
 
   const handleTouchStart = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
+    e.preventDefault(); // Prevent default browser behavior (selection/menu)
     if (gameStateRef.current === GameState.PAUSED) return;
     if (action === 'left') { inputRef.current.dir = -1; setActiveAction(prev => ({...prev, left: true})); }
     if (action === 'right') { inputRef.current.dir = 1; setActiveAction(prev => ({...prev, right: true})); }
@@ -268,6 +305,7 @@ const App = () => {
   };
 
   const handleTouchEnd = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
+    e.preventDefault();
     if (action === 'left') { 
         if(inputRef.current.dir === -1) inputRef.current.dir = 0; 
         setActiveAction(prev => ({...prev, left: false})); 
@@ -287,9 +325,18 @@ const App = () => {
   };
 
   return (
-    <div className="relative w-full h-[100dvh] bg-gray-900 flex justify-center overflow-hidden font-mono text-white">
+    <div 
+      className="relative w-full h-[100dvh] bg-gray-900 flex justify-center overflow-hidden font-mono text-white"
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div className="relative w-full h-full max-w-[540px] shadow-2xl">
         <canvas ref={canvasRef} className="block w-full h-full" />
+
+        {/* Slow Home Transition Overlay */}
+        <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-500 ease-in-out ${homeTransition ? 'opacity-100' : 'opacity-0'}`} />
+        
+        {/* Fast Retry Transition Overlay */}
+        <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-200 ease-out ${retryTransition ? 'opacity-100' : 'opacity-0'}`} />
 
         {/* HUD */}
         <div className="absolute top-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col gap-2">
@@ -321,15 +368,27 @@ const App = () => {
                    </div>
                </div>
                
-               {/* Pause Button (Visible only when playing) */}
-               {gameState === GameState.PLAYING && (
-                   <button 
-                       onClick={togglePause}
-                       className="pointer-events-auto bg-black/40 hover:bg-black/60 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm transition-all"
-                   >
-                       <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                   </button>
-               )}
+               <div className="flex gap-2">
+                   {/* Debug Button */}
+                   {gameState === GameState.PLAYING && (
+                       <button 
+                           onClick={toggleDebug}
+                           className={`pointer-events-auto p-2 rounded-lg backdrop-blur-sm transition-all ${debugMode ? 'bg-green-600/60 text-white' : 'bg-black/40 text-white/70 hover:bg-black/60 hover:text-white'}`}
+                       >
+                           🐞
+                       </button>
+                   )}
+                   
+                   {/* Pause Button (Visible only when playing) */}
+                   {gameState === GameState.PLAYING && (
+                       <button 
+                           onClick={togglePause}
+                           className="pointer-events-auto bg-black/40 hover:bg-black/60 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm transition-all"
+                       >
+                           <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                       </button>
+                   )}
+               </div>
            </div>
         </div>
 
@@ -360,7 +419,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_36_stable</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_46_polish_2</div>
           </div>
         )}
 
@@ -371,20 +430,23 @@ const App = () => {
              <div className="flex flex-col gap-4 w-full max-w-xs">
                  <button 
                     onClick={resumeGame}
-                    className="w-full py-4 bg-sky-600 hover:bg-sky-500 active:translate-y-1 border-b-4 border-sky-800 rounded-xl font-bold text-lg transition-all"
+                    className="w-full py-4 bg-sky-600 hover:bg-sky-500 active:translate-y-1 border-b-4 border-sky-800 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-3"
                  >
+                    <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                     RESUME
                  </button>
                  <button 
-                    onClick={startGame}
-                    className="w-full py-4 bg-red-600 hover:bg-red-500 active:translate-y-1 border-b-4 border-red-800 rounded-xl font-bold text-lg transition-all"
+                    onClick={handleRetry}
+                    className="w-full py-4 bg-red-600 hover:bg-red-500 active:translate-y-1 border-b-4 border-red-800 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-3"
                  >
+                    <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
                     RETRY
                  </button>
                  <button 
                     onClick={toTitle}
-                    className="w-full py-4 bg-gray-700 hover:bg-gray-600 active:translate-y-1 border-b-4 border-gray-900 rounded-xl font-bold text-lg transition-all"
+                    className="w-full py-4 bg-gray-700 hover:bg-gray-600 active:translate-y-1 border-b-4 border-gray-900 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-3"
                  >
+                    <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
                     HOME
                  </button>
              </div>
@@ -418,14 +480,16 @@ const App = () => {
             <div className="flex gap-4 w-full max-w-xs">
               <button 
                 onClick={toTitle}
-                className="flex-1 py-4 bg-gray-700 hover:bg-gray-600 active:translate-y-1 border-b-4 border-gray-900 rounded-xl font-bold transition-all"
+                className="flex-1 py-4 bg-gray-700 hover:bg-gray-600 active:translate-y-1 border-b-4 border-gray-900 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
               >
+                <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
                 HOME
               </button>
               <button 
-                onClick={startGame}
-                className="flex-1 py-4 bg-red-600 hover:bg-red-500 active:translate-y-1 border-b-4 border-red-800 rounded-xl font-bold transition-all"
+                onClick={handleRetry}
+                className="flex-1 py-4 bg-red-600 hover:bg-red-500 active:translate-y-1 border-b-4 border-red-800 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
               >
+                <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
                 RETRY
               </button>
             </div>
@@ -442,32 +506,32 @@ const App = () => {
               {/* D-Pad Area */}
               <div className="flex gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className={`w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.left ? 'bg-white/40 border-white' : ''}`}
+                   className={`w-24 h-28 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.left ? 'bg-white/40 border-white' : ''}`}
                    onTouchStart={handleTouchStart('left')} onTouchEnd={handleTouchEnd('left')}
                  >
-                   <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                   <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                  </div>
                  <div 
-                   className={`w-20 h-24 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.right ? 'bg-white/40 border-white' : ''}`}
+                   className={`w-24 h-28 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.right ? 'bg-white/40 border-white' : ''}`}
                    onTouchStart={handleTouchStart('right')} onTouchEnd={handleTouchEnd('right')}
                  >
-                   <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                   <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
                  </div>
               </div>
 
               {/* Action Buttons with Visual Feedback */}
               <div className="flex flex-col gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className={`w-20 h-20 bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.jump ? 'scale-95 bg-white/50' : ''}`}
+                   className={`w-24 h-24 bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.jump ? 'scale-95 bg-white/50' : ''}`}
                    onTouchStart={handleTouchStart('jump')} onTouchEnd={handleTouchEnd('jump')}
                  >
-                    <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
+                    <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
                  </div>
                  <div 
-                   className={`w-20 h-20 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.dash ? 'scale-95 bg-white/50' : ''}`}
+                   className={`w-24 h-24 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.dash ? 'scale-95 bg-white/50' : ''}`}
                    onTouchStart={handleTouchStart('dash')} onTouchEnd={handleTouchEnd('dash')}
                  >
-                    <svg className="w-8 h-8 fill-white" viewBox="0 0 24 24"><path transform="translate(0, 3)" d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41M7.41,9.41L12,4.83L16.59,9.41L18,8L12,2L6,8L7.41,9.41Z"/></svg>
+                    <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path transform="translate(0, 3)" d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41M7.41,9.41L12,4.83L16.59,9.41L18,8L12,2L6,8L7.41,9.41Z"/></svg>
                  </div>
               </div>
             </div>

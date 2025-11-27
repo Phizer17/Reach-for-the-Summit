@@ -1,0 +1,355 @@
+
+import { GameEngine } from '../GameEngine';
+import { COLORS, VIEW_WIDTH, TILE_SIZE } from '../../constants';
+import { GameState } from '../../types';
+
+export class Renderer {
+    ctx: CanvasRenderingContext2D;
+    canvas: HTMLCanvasElement;
+    
+    // Assets
+    tilesetImg: HTMLImageElement | null = null;
+    platformImg: HTMLImageElement | null = null;
+    bgImg: HTMLImageElement | null = null;
+    springImg: HTMLImageElement | null = null;
+    berryImg: HTMLImageElement | null = null; 
+    crystalImg: HTMLImageElement | null = null;
+
+    constructor(canvas: HTMLCanvasElement) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d')!;
+        this.ctx.imageSmoothingEnabled = false;
+        this.loadTextures();
+    }
+
+    resize(viewHeight: number) {
+        this.canvas.width = VIEW_WIDTH;
+        this.canvas.height = this.canvas.clientHeight * (VIEW_WIDTH / this.canvas.clientWidth);
+        if(this.ctx) this.ctx.imageSmoothingEnabled = false;
+    }
+
+    loadTextures() {
+        const c = { base: '#201c3b', mid: '#332c50', light: '#68c2d3', shadow: '#110d21', snow: '#ffffff', snowShade: '#8daac9' };
+        
+        // Tileset
+        const tilesetSvg = `<svg width="96" height="96" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="rockPat" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse"><rect width="24" height="24" fill="${c.base}"/><path d="M0 24 L24 0" stroke="${c.mid}" stroke-width="6"/><path d="M-12 24 L12 0" stroke="${c.mid}" stroke-width="6"/><path d="M12 24 L36 0" stroke="${c.mid}" stroke-width="6"/><rect x="6" y="14" width="2" height="2" fill="${c.light}" opacity="0.3"/><rect x="16" y="4" width="2" height="2" fill="${c.light}" opacity="0.3"/></pattern></defs><rect width="96" height="96" fill="url(#rockPat)"/><g><rect x="0" y="0" width="2" height="96" fill="${c.light}"/><rect x="2" y="0" width="2" height="96" fill="${c.mid}" opacity="0.5"/></g><g transform="translate(48, 0)"><rect x="22" y="0" width="2" height="96" fill="${c.shadow}"/><rect x="20" y="0" width="2" height="96" fill="${c.shadow}" opacity="0.5"/></g><g transform="translate(72, 0)"><rect x="0" y="0" width="2" height="96" fill="${c.light}"/><rect x="22" y="0" width="2" height="96" fill="${c.shadow}"/></g><g><rect x="0" y="0" width="96" height="6" fill="${c.snow}"/><rect x="0" y="6" width="96" height="2" fill="${c.snowShade}"/><path d="M4 8 H8 V10 H4 Z" fill="${c.snow}"/><path d="M20 8 H26 V11 H20 Z" fill="${c.snow}"/><path d="M44 8 H48 V9 H44 Z" fill="${c.snow}"/><path d="M60 8 H66 V12 H60 Z" fill="${c.snow}"/><path d="M85 8 H88 V10 H85 Z" fill="${c.snow}"/><rect x="0" y="0" width="2" height="6" fill="${c.snow}"/><rect x="94" y="0" width="2" height="6" fill="${c.snow}"/></g><g transform="translate(0, 48)"><rect x="0" y="22" width="96" height="2" fill="${c.shadow}"/><rect x="0" y="20" width="96" height="2" fill="${c.shadow}" opacity="0.5"/></g><g transform="translate(0, 72)"><rect x="0" y="22" width="96" height="2" fill="${c.shadow}"/><rect x="0" y="20" width="96" height="2" fill="${c.shadow}" opacity="0.5"/><rect x="0" y="0" width="96" height="6" fill="${c.snow}"/><rect x="0" y="6" width="96" height="2" fill="${c.snowShade}"/></g></svg>`.trim();
+        this.tilesetImg = new Image(); this.tilesetImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(tilesetSvg);
+
+        // Platform
+        const platformSvg = `<svg width="24" height="14" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="2" width="24" height="8" fill="#5c4436"/><rect x="0" y="2" width="24" height="2" fill="#82604d"/> <rect x="0" y="9" width="24" height="1" fill="#33251d"/> <rect x="4" y="2" width="2" height="8" fill="#33251d" opacity="0.5"/><rect x="18" y="2" width="2" height="8" fill="#33251d" opacity="0.5"/><rect x="0" y="0" width="24" height="3" fill="#e8f7ff"/></svg>`.trim();
+        this.platformImg = new Image(); this.platformImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(platformSvg);
+
+        // Spring
+        const springSvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="18" width="20" height="6" rx="2" fill="#555"/><rect x="3" y="19" width="18" height="4" fill="#333"/><path d="M4 18 L20 18 L4 14 L20 14 L4 10" stroke="#ccc" stroke-width="3" fill="none" stroke-linecap="round"/><rect x="2" y="8" width="20" height="4" rx="1" fill="#e04040"/><rect x="4" y="9" width="16" height="2" fill="#ff6666"/></svg>`.trim();
+        this.springImg = new Image(); this.springImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(springSvg);
+
+        // BG
+        const bgSvg = `<svg width="552" height="960" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sky" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#111221"/><stop offset="100%" stop-color="#282638"/></linearGradient></defs><rect width="552" height="960" fill="url(#sky)"/><path d="M0 960 L0 800 L100 700 L250 850 L400 720 L552 800 L552 960 Z" fill="#1b1b29"/><g fill="#fff" opacity="0.4"><circle cx="50" cy="100" r="1"/><circle cx="200" cy="50" r="1.5"/><circle cx="450" cy="150" r="1"/><circle cx="300" cy="300" r="1"/><circle cx="100" cy="400" r="1"/></g></svg>`.trim();
+        this.bgImg = new Image(); this.bgImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(bgSvg);
+
+        // Berry
+        const berrySvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 21 C17 19 20 14 20 10 C20 7 18 5 12 5 C6 5 4 7 4 10 C4 14 7 19 12 21 Z" fill="#ff004d"/><circle cx="8" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="12" cy="13" r="1" fill="#fff" opacity="0.6"/><circle cx="8" cy="16" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="16" r="1" fill="#fff" opacity="0.6"/><path d="M12 5 L9 3 L8 6 L12 8 L16 6 L15 3 Z" fill="#00e436"/></svg>`.trim();
+        this.berryImg = new Image(); this.berryImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(berrySvg);
+
+        // Crystal
+        const crystalSvg = `<svg width="30" height="30" xmlns="http://www.w3.org/2000/svg"><path d="M15 2 L28 15 L15 28 L2 15 Z" fill="#00e436" opacity="0.8"/><path d="M15 6 L24 15 L15 24 L6 15 Z" fill="#80ff9d" opacity="0.6"/><path d="M15 2 L28 15 L15 28 L2 15 Z" stroke="#fff" stroke-width="2" fill="none" opacity="0.5"/></svg>`.trim();
+        this.crystalImg = new Image(); this.crystalImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(crystalSvg);
+    }
+
+    drawTiledRect(game: GameEngine, x: number, y: number, w: number, h: number) {
+        if (!this.tilesetImg) return;
+        const ctx = this.ctx;
+        const TS = TILE_SIZE;
+        
+        for(let cx = x; cx < x + w; cx += TS) {
+            for(let cy = y; cy < y + h; cy += TS) {
+                const u = game.levelGen.isSolidAt(cx, cy - TS, game.solids);
+                const d = game.levelGen.isSolidAt(cx, cy + TS, game.solids);
+                const l = game.levelGen.isSolidAt(cx - TS, cy, game.solids);
+                const r = game.levelGen.isSolidAt(cx + TS, cy, game.solids);
+
+                let srcX = 24; 
+                if (!l && r) srcX = 0; 
+                else if (l && !r) srcX = 48;
+                else if (!l && !r) srcX = 72;
+
+                let srcY = 24; 
+                if (!u) srcY = 0;
+                else if (!d) srcY = 48;
+                
+                if (h <= TS) srcY = 72; 
+
+                ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, Math.floor(cx), Math.floor(cy), TS, TS);
+            }
+        }
+    }
+
+    drawPlayer(game: GameEngine, p: any) {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.translate(Math.floor(p.x + p.w / 2), Math.floor(p.y + p.h / 2));
+        
+        // Draw Dash Direction Indicator
+        if (p.canDash && !p.isDashing && game.state === GameState.PLAYING) {
+             ctx.save();
+             let dx = game.lastInputDir;
+             let dy = 0;
+             // If no input, point in face direction
+             if (dx === 0) dx = p.faceDir;
+             
+             // Simple white triangle
+             const angle = Math.atan2(dy, dx);
+             const dist = 24;
+             ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
+             ctx.rotate(angle);
+             
+             ctx.fillStyle = '#ffffff';
+             ctx.globalAlpha = 0.6;
+             ctx.beginPath();
+             ctx.moveTo(4, 0);
+             ctx.lineTo(-4, -4);
+             ctx.lineTo(-4, 4);
+             ctx.fill();
+             ctx.restore();
+        }
+
+        ctx.scale(p.sx * p.faceDir, p.sy);
+
+        const color = p.isDashing ? COLORS.hairDash : (p.canDash ? COLORS.hairIdle : COLORS.hairNoDash);
+        if (p.flashTimer > 0) ctx.fillStyle = '#ffffff';
+        else ctx.fillStyle = color;
+
+        // Hair
+        ctx.fillRect(-10, -8, 20, 20); 
+        
+        // Body
+        ctx.fillStyle = p.flashTimer > 0 ? '#ffffff' : color;
+        ctx.fillRect(-6, 0, 12, 12); 
+        
+        // Eyes
+        if (p.blinkTimer <= 0) {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(1, -2, 2, 4); 
+            ctx.fillRect(5, -2, 2, 4); 
+        }
+        ctx.restore();
+    }
+
+    drawDebug(game: GameEngine) {
+        const ctx = this.ctx;
+        const p = game.player;
+        
+        ctx.save();
+        ctx.translate(0, Math.floor(-game.cameraY));
+        
+        // Solids
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+        ctx.lineWidth = 2;
+        game.solids.forEach(s => {
+            ctx.strokeRect(s.x, s.y, s.w, s.h);
+        });
+        
+        // Platforms
+        ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
+        game.platforms.forEach(pl => {
+            ctx.strokeRect(pl.x, pl.y, pl.w, pl.h);
+        });
+        
+        // Player Hitbox
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        
+        // Collision Sensors (Visualizing the "Trunk" check)
+        ctx.strokeStyle = 'yellow';
+        ctx.strokeRect(p.x, p.y + 10, p.w, p.h - 20);
+
+        ctx.restore();
+        
+        // Stats Overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 60, 200, 120);
+        ctx.fillStyle = '#0f0';
+        ctx.font = '12px monospace';
+        ctx.fillText(`VX: ${p.vx.toFixed(2)}`, 10, 80);
+        ctx.fillText(`VY: ${p.vy.toFixed(2)}`, 10, 95);
+        ctx.fillText(`Grounded: ${p.grounded}`, 10, 110);
+        ctx.fillText(`CanDash: ${p.canDash}`, 10, 125);
+        ctx.fillText(`OnWall: ${p.onWall}`, 10, 140);
+        ctx.fillText(`SpringTimer: ${p.springTimer.toFixed(2)}`, 10, 155);
+        ctx.fillText(`FPS: ${Math.round(1000/16)}`, 10, 170);
+    }
+
+    draw(game: GameEngine) {
+        const ctx = this.ctx;
+        const p = game.player;
+
+        // Clear
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Shake
+        ctx.save();
+        if (game.shake > 0) {
+            const dx = (Math.random() - 0.5) * game.shake * 2;
+            const dy = (Math.random() - 0.5) * game.shake * 2;
+            ctx.translate(Math.floor(dx), Math.floor(dy));
+        }
+
+        // Parallax BG
+        if (this.bgImg) {
+            const bgY = Math.floor(game.cameraY * 0.5) % 960;
+            ctx.drawImage(this.bgImg, 0, -bgY, VIEW_WIDTH, 960);
+            ctx.drawImage(this.bgImg, 0, -bgY + 960, VIEW_WIDTH, 960);
+            ctx.drawImage(this.bgImg, 0, -bgY - 960, VIEW_WIDTH, 960);
+        }
+
+        // Camera Transform
+        ctx.translate(0, Math.floor(-game.cameraY));
+
+        // Draw Solids
+        game.solids.forEach(s => {
+            this.drawTiledRect(game, s.x, s.y, s.w, s.h);
+        });
+
+        // Draw Platforms
+        game.platforms.forEach(pl => {
+            if (this.platformImg) {
+                 for(let i=0; i<pl.w; i+=24) {
+                     ctx.drawImage(this.platformImg, pl.x + i, pl.y, 24, 14);
+                 }
+            } else {
+                ctx.fillStyle = COLORS.rock;
+                ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+            }
+        });
+
+        // Springs
+        game.springs.forEach(s => {
+             if (this.springImg) {
+                 ctx.save();
+                 ctx.translate(s.x + 12, s.y + 12);
+                 if (s.dir === 'left') ctx.rotate(-Math.PI/2);
+                 if (s.dir === 'right') ctx.rotate(Math.PI/2);
+                 const scale = 1 + (s.animTimer > 0 ? 0.4 : 0);
+                 const off = s.animTimer > 0 ? -4 : 0;
+                 ctx.drawImage(this.springImg, -12, -12 + off, 24, 24);
+                 ctx.restore();
+             }
+        });
+
+        // Crystals
+        game.crystals.forEach(c => {
+            if (c.respawnTimer > 0) {
+                 // GHOST OUTLINE
+                 ctx.save();
+                 ctx.strokeStyle = COLORS.ghost;
+                 ctx.lineWidth = 2;
+                 ctx.setLineDash([4, 4]);
+                 const cx = c.x + c.w/2;
+                 const cy = c.y + c.h/2;
+                 ctx.beginPath();
+                 ctx.moveTo(cx, cy - 8);
+                 ctx.lineTo(cx + 8, cy);
+                 ctx.lineTo(cx, cy + 8);
+                 ctx.lineTo(cx - 8, cy);
+                 ctx.closePath();
+                 ctx.stroke();
+                 ctx.restore();
+                 return;
+            }
+            // Bobbing
+            const bob = Math.sin(Date.now() / 500) * 2; 
+            ctx.fillStyle = COLORS.crystal;
+            const cx = c.x + c.w/2;
+            const cy = c.y + c.h/2 + bob;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - 8);
+            ctx.lineTo(cx + 8, cy);
+            ctx.lineTo(cx, cy + 8);
+            ctx.lineTo(cx - 8, cy);
+            ctx.fill();
+            // Glow
+            ctx.globalAlpha = 0.3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 12 + Math.sin(Date.now()/100)*2, 0, Math.PI*2);
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+        });
+
+        // Berries
+        game.berries.forEach(b => {
+             if (b.state === 2) return;
+             if (this.berryImg) {
+                 const bob = b.state === 0 ? Math.sin(Date.now()/250) * 3 : 0;
+                 ctx.drawImage(this.berryImg, b.x, b.y + bob, 30, 30);
+             }
+        });
+
+        // Player Trail
+        p.trail.forEach(t => {
+            ctx.save();
+            ctx.globalAlpha = t.alpha * 0.5;
+            ctx.translate(Math.floor(t.x + 12), Math.floor(t.y + 12));
+            ctx.scale(t.frame.sx * t.frame.faceDir, t.frame.sy);
+            ctx.fillStyle = COLORS.hairDash;
+            ctx.fillRect(-10, -8, 20, 20); 
+            ctx.fillRect(-6, 0, 12, 12);  
+            ctx.restore();
+        });
+        ctx.globalAlpha = 1;
+
+        // Player
+        if (game.state !== GameState.GAMEOVER && game.state !== GameState.DYING) {
+             this.drawPlayer(game, p);
+        }
+
+        // Particles
+        game.particles.forEach(pt => {
+             ctx.fillStyle = pt.color;
+             ctx.fillRect(Math.floor(pt.x), Math.floor(pt.y), Math.floor(pt.size), Math.floor(pt.size));
+        });
+
+        // Ripples
+        ctx.lineWidth = 2;
+        game.ripples.forEach(r => {
+             ctx.strokeStyle = `rgba(255, 255, 255, ${r.alpha})`;
+             ctx.beginPath();
+             ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+             ctx.stroke();
+        });
+
+        // Death Ripple
+        if (game.deathRipple.active) {
+            ctx.fillStyle = game.deathRipple.color;
+            ctx.beginPath();
+            ctx.arc(game.deathRipple.x, game.deathRipple.y, game.deathRipple.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Snow (Foreground)
+        ctx.fillStyle = 'white';
+        game.snow.forEach(s => {
+             ctx.globalAlpha = 0.6;
+             ctx.fillRect(Math.floor(s.x), Math.floor(s.y), Math.floor(s.size), Math.floor(s.size));
+        });
+        ctx.globalAlpha = 1;
+
+        ctx.restore(); // Pop Camera 
+
+        // Draw Abyss Gradient
+        if (game.state === GameState.PLAYING) {
+             const grad = ctx.createLinearGradient(0, game.viewHeight - 150, 0, game.viewHeight);
+             grad.addColorStop(0, "rgba(0,0,0,0)");
+             grad.addColorStop(1, "rgba(0,0,0,1)");
+             ctx.fillStyle = grad;
+             ctx.fillRect(0, game.viewHeight - 150, this.canvas.width, 150);
+        }
+
+        // DRAW DEBUG OVERLAY if enabled
+        if (game.debug) {
+            this.drawDebug(game);
+        }
+
+        ctx.restore(); // Pop Shake
+    }
+}
