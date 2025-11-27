@@ -1,4 +1,3 @@
-
 import { GameState, Rect, Platform, Berry, Crystal, Solid, Particle, Spring, TrailPoint } from '../types';
 import { COLORS, CHAPTERS, VIEW_WIDTH, TILE_SIZE, DASH_SPEED } from '../constants';
 import { sfx } from '../services/audioService';
@@ -240,7 +239,7 @@ export class GameEngine {
         }
 
         // Camera Follow
-        const targetY = p.y - this.viewHeight * 0.40; 
+        const targetY = p.y - this.viewHeight * 0.25; // Lift camera higher
         if (targetY < this.cameraY) {
             this.cameraY += (targetY - this.cameraY) * 0.15;
         }

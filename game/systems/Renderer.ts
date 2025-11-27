@@ -1,4 +1,3 @@
-
 import { GameEngine } from '../GameEngine';
 import { COLORS, VIEW_WIDTH, TILE_SIZE } from '../../constants';
 import { GameState } from '../../types';
@@ -47,8 +46,8 @@ export class Renderer {
         const bgSvg = `<svg width="552" height="960" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sky" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#111221"/><stop offset="100%" stop-color="#282638"/></linearGradient></defs><rect width="552" height="960" fill="url(#sky)"/><path d="M0 960 L0 800 L100 700 L250 850 L400 720 L552 800 L552 960 Z" fill="#1b1b29"/><g fill="#fff" opacity="0.4"><circle cx="50" cy="100" r="1"/><circle cx="200" cy="50" r="1.5"/><circle cx="450" cy="150" r="1"/><circle cx="300" cy="300" r="1"/><circle cx="100" cy="400" r="1"/></g></svg>`.trim();
         this.bgImg = new Image(); this.bgImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(bgSvg);
 
-        // Berry
-        const berrySvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 21 C17 19 20 14 20 10 C20 7 18 5 12 5 C6 5 4 7 4 10 C4 14 7 19 12 21 Z" fill="#ff004d"/><circle cx="8" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="12" cy="13" r="1" fill="#fff" opacity="0.6"/><circle cx="8" cy="16" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="16" r="1" fill="#fff" opacity="0.6"/><path d="M12 5 L9 3 L8 6 L12 8 L16 6 L15 3 Z" fill="#00e436"/></svg>`.trim();
+        // Berry (Red)
+        const berrySvg = `<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 21 C17 19 20 14 20 10 C20 7 18 5 12 5 C6 5 4 7 4 10 C4 14 7 19 12 21 Z" fill="${COLORS.berry}"/><circle cx="8" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="9" r="1" fill="#fff" opacity="0.6"/><circle cx="12" cy="13" r="1" fill="#fff" opacity="0.6"/><circle cx="8" cy="16" r="1" fill="#fff" opacity="0.6"/><circle cx="16" cy="16" r="1" fill="#fff" opacity="0.6"/><path d="M12 5 L9 3 L8 6 L12 8 L16 6 L15 3 Z" fill="#00e436"/></svg>`.trim();
         this.berryImg = new Image(); this.berryImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(berrySvg);
 
         // Crystal
@@ -56,17 +55,39 @@ export class Renderer {
         this.crystalImg = new Image(); this.crystalImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(crystalSvg);
     }
 
+    // Helper to check solid existence with tolerance to fix seam issues
+    isSolidAt(game: GameEngine, x: number, y: number): boolean {
+        // Check point with slight inset to avoid boundary errors
+        const cx = x + TILE_SIZE / 2;
+        const cy = y + TILE_SIZE / 2;
+        for (const s of game.solids) {
+            // Relaxed check: Use >= and <= slightly to catch exact edge matches if they are neighbors
+            if (cx > s.x && cx < s.x + s.w &&
+                cy > s.y && cy < s.y + s.h) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     drawTiledRect(game: GameEngine, x: number, y: number, w: number, h: number) {
         if (!this.tilesetImg) return;
         const ctx = this.ctx;
         const TS = TILE_SIZE;
         
-        for(let cx = x; cx < x + w; cx += TS) {
-            for(let cy = y; cy < y + h; cy += TS) {
-                const u = game.levelGen.isSolidAt(cx, cy - TS, game.solids);
-                const d = game.levelGen.isSolidAt(cx, cy + TS, game.solids);
-                const l = game.levelGen.isSolidAt(cx - TS, cy, game.solids);
-                const r = game.levelGen.isSolidAt(cx + TS, cy, game.solids);
+        const startX = Math.floor(x);
+        const startY = Math.floor(y);
+        const endX = startX + w;
+        const endY = startY + h;
+
+        for(let cx = startX; cx < endX; cx += TS) {
+            for(let cy = startY; cy < endY; cy += TS) {
+                // Check neighbors using the specific grid positions
+                // We add/subtract 2px to move safely into the neighbor cell
+                const u = this.isSolidAt(game, cx, cy - TS + 2);
+                const d = this.isSolidAt(game, cx, cy + TS - 2);
+                const l = this.isSolidAt(game, cx - TS + 2, cy);
+                const r = this.isSolidAt(game, cx + TS - 2, cy);
 
                 let srcX = 24; 
                 if (!l && r) srcX = 0; 
@@ -79,7 +100,7 @@ export class Renderer {
                 
                 if (h <= TS) srcY = 72; 
 
-                ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, Math.floor(cx), Math.floor(cy), TS, TS);
+                ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, cx, cy, TS, TS);
             }
         }
     }
@@ -93,21 +114,21 @@ export class Renderer {
         if (p.canDash && !p.isDashing && game.state === GameState.PLAYING) {
              ctx.save();
              let dx = game.lastInputDir;
-             let dy = 0;
-             // If no input, point in face direction
-             if (dx === 0) dx = p.faceDir;
+             let angle = -Math.PI / 2; 
+
+             if (dx !== 0) {
+                 angle = Math.atan2(-0.707, dx * 0.707);
+             }
              
-             // Simple white triangle
-             const angle = Math.atan2(dy, dx);
              const dist = 24;
              ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
-             ctx.rotate(angle);
+             ctx.rotate(angle + Math.PI / 2);
              
              ctx.fillStyle = '#ffffff';
              ctx.globalAlpha = 0.6;
              ctx.beginPath();
-             ctx.moveTo(4, 0);
-             ctx.lineTo(-4, -4);
+             ctx.moveTo(0, -4);
+             ctx.lineTo(4, 4);
              ctx.lineTo(-4, 4);
              ctx.fill();
              ctx.restore();
@@ -159,24 +180,38 @@ export class Renderer {
         ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
         ctx.fillRect(p.x, p.y, p.w, p.h);
         
+        // Berry Hitboxes
+        ctx.strokeStyle = '#ffd700';
+        game.berries.forEach(b => {
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+        });
+
+        // Crystal Hitboxes
+        ctx.strokeStyle = '#00e436';
+        game.crystals.forEach(c => {
+            ctx.strokeRect(c.x, c.y, c.w, c.h);
+        });
+
         // Collision Sensors (Visualizing the "Trunk" check)
         ctx.strokeStyle = 'yellow';
-        ctx.strokeRect(p.x, p.y + 10, p.w, p.h - 20);
+        ctx.strokeRect(p.x, p.y + 8, p.w, p.h - 16);
 
         ctx.restore();
         
-        // Stats Overlay
+        // Stats Overlay (Moved to Top Right to avoid HUD)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 60, 200, 120);
+        ctx.fillRect(VIEW_WIDTH - 160, 60, 150, 120);
         ctx.fillStyle = '#0f0';
         ctx.font = '12px monospace';
-        ctx.fillText(`VX: ${p.vx.toFixed(2)}`, 10, 80);
-        ctx.fillText(`VY: ${p.vy.toFixed(2)}`, 10, 95);
-        ctx.fillText(`Grounded: ${p.grounded}`, 10, 110);
-        ctx.fillText(`CanDash: ${p.canDash}`, 10, 125);
-        ctx.fillText(`OnWall: ${p.onWall}`, 10, 140);
-        ctx.fillText(`SpringTimer: ${p.springTimer.toFixed(2)}`, 10, 155);
-        ctx.fillText(`FPS: ${Math.round(1000/16)}`, 10, 170);
+        let ly = 80;
+        const lx = VIEW_WIDTH - 150;
+        ctx.fillText(`VX: ${p.vx.toFixed(2)}`, lx, ly); ly+=15;
+        ctx.fillText(`VY: ${p.vy.toFixed(2)}`, lx, ly); ly+=15;
+        ctx.fillText(`Grounded: ${p.grounded}`, lx, ly); ly+=15;
+        ctx.fillText(`CanDash: ${p.canDash}`, lx, ly); ly+=15;
+        ctx.fillText(`OnWall: ${p.onWall}`, lx, ly); ly+=15;
+        ctx.fillText(`SpringTimer: ${p.springTimer.toFixed(2)}`, lx, ly); ly+=15;
+        ctx.fillText(`FPS: ${Math.round(1000/16)}`, lx, ly);
     }
 
     draw(game: GameEngine) {
@@ -276,12 +311,14 @@ export class Renderer {
             ctx.globalAlpha = 1.0;
         });
 
-        // Berries
+        // Berries (Red)
         game.berries.forEach(b => {
              if (b.state === 2) return;
              if (this.berryImg) {
                  const bob = b.state === 0 ? Math.sin(Date.now()/250) * 3 : 0;
-                 ctx.drawImage(this.berryImg, b.x, b.y + bob, 30, 30);
+                 const size = 20; 
+                 const offset = (30 - size) / 2;
+                 ctx.drawImage(this.berryImg, b.x + offset, b.y + bob + offset, size, size);
              }
         });
 

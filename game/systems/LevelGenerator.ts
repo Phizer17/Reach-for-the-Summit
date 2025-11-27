@@ -128,18 +128,20 @@ export class LevelGenerator {
             this.lastSolidY = currentY - hS;
             this.lastX = x + w / 2; 
             
-            // Berry on Solid (Reduced probability)
-            if (Math.random() > 0.8) { // Decreased from 0.6 to 0.8
-                // Ensure far reach placement
-                const offset = Math.random() > 0.5 ? -70 : w + 40;
-                const berryX = x + offset;
-                const berryY = currentY - hS - 20 - Math.random() * 60; 
-                
-                if (berryX > 30 && berryX < VIEW_WIDTH - 30) {
-                     // Strict air check
-                     if (!this.isSolidAt(berryX, berryY, solids) && !this.isSolidAt(berryX + 15, berryY + 15, solids)) {
-                        berries.push({ x: berryX, y: berryY, w: 30, h: 30, baseY: berryY, state: 0 });
-                     }
+            // Berry on Solid (Reduced probability to 0.4)
+            if (Math.random() > 0.6) { // Reduced check
+                if (Math.random() < 0.4) { // effective 24% chance
+                    // Ensure far reach placement
+                    const offset = Math.random() > 0.5 ? -70 : w + 40;
+                    const berryX = x + offset;
+                    const berryY = currentY - hS - 20 - Math.random() * 60; 
+                    
+                    if (berryX > 30 && berryX < VIEW_WIDTH - 30) {
+                         // Strict air check
+                         if (!this.isSolidAt(berryX, berryY, solids) && !this.isSolidAt(berryX + 15, berryY + 15, solids)) {
+                            berries.push({ x: berryX, y: berryY, w: 30, h: 30, baseY: berryY, state: 0 });
+                         }
+                    }
                 }
             }
 

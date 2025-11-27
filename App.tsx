@@ -24,6 +24,7 @@ const App = () => {
   
   const [homeTransition, setHomeTransition] = useState(false);
   const [retryTransition, setRetryTransition] = useState(false);
+  const [startTransition, setStartTransition] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
 
   // Input Highlighting
@@ -173,14 +174,18 @@ const App = () => {
       }, 250); // 250ms fast transition
   };
 
-  // Direct start without transition (for initial title screen)
+  // Direct start with transition
   const startGame = () => {
-    sfx.init();
-    if (engineRef.current) {
-      engineRef.current.initGame();
-      setGameState(GameState.PLAYING);
-      setHudTimer("00:00.00");
-    }
+    setStartTransition(true);
+    setTimeout(() => {
+        sfx.init();
+        if (engineRef.current) {
+          engineRef.current.initGame();
+          setGameState(GameState.PLAYING);
+          setHudTimer("00:00.00");
+        }
+        setStartTransition(false);
+    }, 500);
   };
 
   // Slow transition for Home
@@ -338,6 +343,9 @@ const App = () => {
         {/* Fast Retry Transition Overlay */}
         <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-200 ease-out ${retryTransition ? 'opacity-100' : 'opacity-0'}`} />
 
+        {/* Start Game Transition Overlay */}
+        <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-500 ease-in-out ${startTransition ? 'opacity-100' : 'opacity-0'}`} />
+
         {/* HUD */}
         <div className="absolute top-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col gap-2">
            <div className="flex justify-between items-start">
@@ -419,7 +427,7 @@ const App = () => {
             >
               🏔 CLIMB
             </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_46_polish_2</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_47_polish_3</div>
           </div>
         )}
 

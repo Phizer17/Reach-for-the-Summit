@@ -1,6 +1,8 @@
-export const VIEW_WIDTH = 552; 
+export const VIEW_WIDTH = 480; // Reduced to 20 tiles for better mobile visibility
 export const TILE_SIZE = 24;
 
+// Physics Tuned for:
+// Max Jump Height: 120px (5 tiles)
 export const GRAVITY = 2666; 
 export const JUMP_FORCE = -800; 
 export const MAX_FALL_SPEED = 900; 
@@ -15,9 +17,11 @@ export const WALL_JUMP_X = 650;
 export const WALL_JUMP_Y = -750; 
 export const DASH_TIME = 0.10; 
 
+// Parabolic Arc Tuning
+// Goal: Apex ~3 tiles (72px) up, Land ~5 tiles (120px) away at +2 tiles (48px) high
 export const SPRING_SPEED_Y = -1050; 
-export const SPRING_SPEED_X = 2200; 
-export const SPRING_SIDE_LIFT = -900; // Increased for parabolic arc (was -500)
+export const SPRING_SPEED_X = 400; // Reduced base speed, relying on low friction
+export const SPRING_SIDE_LIFT = -600; // Tuned for 3-tile apex
 
 export const COLORS = {
   bg: '#1d1d2b',
@@ -27,7 +31,7 @@ export const COLORS = {
   hairIdle: '#ff004d',
   hairDash: '#fff',
   hairNoDash: '#29adff',
-  berry: '#ff004d',
+  berry: '#ff2244', // Distinct bright red
   crystal: '#00e436',
   ghost: '#888888',
   text: '#fff'

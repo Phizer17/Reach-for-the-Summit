@@ -14,7 +14,8 @@ export class Physics {
 
     checkBounds(p: any) {
         if (p.x < 0) { p.x = 0; p.vx = 0; }
-        if (p.x + p.w > 552) { p.x = 552 - p.w; p.vx = 0; }
+        // Use game constant in future, but fixed width for now
+        if (p.x + p.w > 480) { p.x = 480 - p.w; p.vx = 0; }
     }
 
     spawnEffect(game: GameEngine, x: number, y: number, c: string, n: number = 8) {
@@ -35,25 +36,26 @@ export class Physics {
     }
 
     resolveSolidsX(p: any, solids: Solid[]) {
-        // AABB FIX: Contract vertical detection to only collide with "Trunk"
-        // This prevents hitting corners with the head or feet.
-        const rect = { x: p.x, y: p.y + 10, w: p.w, h: p.h - 20 };
+        // AABB FIX: Very strict vertical bounds to prevent corner snagging
+        // We only check for walls if the wall overlaps the player's "trunk"
+        // p.y + 10 to p.y + p.h - 10.
+        const trunkTop = p.y + 8;
+        const trunkBottom = p.y + p.h - 8;
+        const rect = { x: p.x, y: trunkTop, w: p.w, h: trunkBottom - trunkTop };
         
         for (const s of solids) {
-            // Ignore solids that are effectively floors (blocks below player feet)
-            // If player's bottom is roughly at the block's top, it's a floor interaction, not a wall.
-            if (p.y + p.h <= s.y + 6) continue;
+            // Ignore floors completely
+            if (s.y >= p.y + p.h - 6) continue;
 
             if (this.AABB(rect, s)) {
-                // "Step Up" Logic (Only if grounded to prevent mid-air snagging)
                 if (p.grounded) {
                     const stepY = p.y - 4;
-                    const stepRect = { x: p.x, y: stepY + 10, w: p.w, h: p.h - 20 };
+                    const stepRect = { x: p.x, y: stepY + 8, w: p.w, h: trunkBottom - trunkTop };
                     let stepCollision = false;
                     
                     for(const otherS of solids) {
-                        if (p.y + p.h <= otherS.y + 6) continue; // Ignore floors for step check too
-                        if(this.AABB(stepRect, otherS)) {
+                        if (otherS.y >= p.y + p.h - 6) continue;
+                        if(this.AABB(stepRect, otherS, -1)) {
                             stepCollision = true; break;
                         }
                     }
@@ -90,11 +92,11 @@ export class Physics {
     }
 
     checkWallOverlap(p: any, solids: Solid[], offset: number): boolean {
-        // Strict wall check using same logic as resolveSolidsX
-        const rect = { x: p.x + offset, y: p.y + 10, w: p.w, h: p.h - 20 };
+        const trunkTop = p.y + 8;
+        const trunkBottom = p.y + p.h - 8;
+        const rect = { x: p.x + offset, y: trunkTop, w: p.w, h: trunkBottom - trunkTop };
         for (const s of solids) {
-            // Ignore floors
-            if (p.y + p.h <= s.y + 6) continue;
+            if (s.y >= p.y + p.h - 6) continue;
             if (this.AABB(rect, s)) return true;
         }
         return false;
@@ -103,7 +105,7 @@ export class Physics {
     update(game: GameEngine, dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
         const p = game.player;
 
-        // Wall Bounce Trigger
+        // Wall Bounce
         if (p.jumpBuffer > 0 && p.wallBounceTimer > 0) {
             let wbDir = 0;
             const checkRect = { x: p.x - 12, y: p.y, w: p.w + 24, h: p.h };
@@ -124,7 +126,7 @@ export class Physics {
             }
         }
 
-        // Dash Start
+        // Dash
         if (input.dash && p.canDash && !p.isDashing) {
             let dx = 0; let dy = -1;
             if (input.dir !== 0) { dx = input.dir * 0.707; dy = -0.707; }
@@ -156,7 +158,7 @@ export class Physics {
                 }
             }
 
-            // Movement Physics
+            // Movement
             if (inputX !== 0) {
                 p.springTimer = 0; 
                 if (Math.sign(inputX) !== Math.sign(p.vx) && p.vx !== 0) {
@@ -178,9 +180,15 @@ export class Physics {
 
             } else {
                 p.moveTimer = 0;
-                const frictionTime = (p.wallJumpTimer > 0 || p.springTimer > 0) ? 0.4 : DECEL_TIME; 
-                const stopFriction = Math.pow(0.001, dt / frictionTime); 
-                p.vx *= stopFriction;
+                // If hit spring, use very low friction to conserve momentum
+                if (p.springTimer > 0) {
+                    // Very slow decay for spring trajectory
+                    p.vx *= Math.pow(0.98, dt * 60); 
+                } else {
+                    const frictionTime = (p.wallJumpTimer > 0) ? 0.4 : DECEL_TIME; 
+                    const stopFriction = Math.pow(0.001, dt / frictionTime); 
+                    p.vx *= stopFriction;
+                }
                 if (Math.abs(p.vx) < 5) p.vx = 0;
             }
             
@@ -191,7 +199,6 @@ export class Physics {
 
         if (!p.isDashing) {
             p.onWall = 0;
-            // Pass -2 and +2 offsets
             if (this.checkWallOverlap(p, game.solids, -2)) p.onWall = -1;
             else if (this.checkWallOverlap(p, game.solids, 2)) p.onWall = 1;
 
@@ -227,14 +234,12 @@ export class Physics {
             this.checkPlatformCollisions(p, game.platforms);
         }
 
-        // Check Collisions (Solids - Y Axis & Corners)
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         for (const s of game.solids) {
             if (this.AABB(rect, s)) {
                 const overlapLeft = (p.x + p.w) - s.x;
                 const overlapRight = (s.x + s.w) - p.x;
                 
-                // CORNER CORRECTION
                 if (overlapLeft < 12) {
                      p.x = s.x - p.w - 0.1; 
                 } else if (overlapRight < 12) {
@@ -256,7 +261,6 @@ export class Physics {
             p.canDash = true; 
         }
 
-        // Entity Interactions
         this.checkEntityCollisions(game);
     }
 
@@ -264,7 +268,6 @@ export class Physics {
         const p = game.player;
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         
-        // Crystals
         for (const c of game.crystals) {
             if (c.respawnTimer <= 0 && this.AABB(rect, c)) {
                 const dashQueued = p.dashBuffer > 0;
@@ -281,7 +284,6 @@ export class Physics {
             }
         }
 
-        // Berries
         for (const b of game.berries) {
             if (b.state === 0 && this.AABB(rect, b)) {
                 b.state = 1;
@@ -290,7 +292,6 @@ export class Physics {
             }
         }
         
-        // Springs
         for (const s of game.springs) {
             if (this.AABB(rect, { x: s.x + 6, y: s.y + 6, w: s.w - 12, h: s.h - 12 })) {
                 sfx.play('spring');
@@ -303,23 +304,23 @@ export class Physics {
                 p.flashTimer = 0.1; 
                 
                 if (s.dir === 'up') {
-                    p.x = s.x; // Snap horizontally to spring center
+                    p.x = s.x; 
                     p.vy = SPRING_SPEED_Y;
                     p.sx = 0.5; p.sy = 1.5; 
                 } else if (s.dir === 'left') {
-                    p.y = s.y; // Snap vertically to spring center
+                    p.y = s.y; 
                     p.vx = -SPRING_SPEED_X;
                     p.vy = SPRING_SIDE_LIFT; 
                     p.faceDir = -1;
                     p.sx = 1.5; p.sy = 0.5; 
-                    p.springTimer = 0.6; // Enable low friction
+                    p.springTimer = 0.5; 
                 } else if (s.dir === 'right') {
-                    p.y = s.y; // Snap vertically to spring center
+                    p.y = s.y; 
                     p.vx = SPRING_SPEED_X;
                     p.vy = SPRING_SIDE_LIFT;
                     p.faceDir = 1;
                     p.sx = 1.5; p.sy = 0.5;
-                    p.springTimer = 0.6; // Enable low friction
+                    p.springTimer = 0.5; 
                 }
             }
         }
