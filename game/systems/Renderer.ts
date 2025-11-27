@@ -96,10 +96,15 @@ export class Renderer {
                 else if (!l && !r) srcX = 72;
 
                 let srcY = 24; 
-                if (!u) srcY = 0;
+                // Seamless vertical blending:
+                // If there is NO block above AND NO block below, use index 72 (Top+Bottom border).
+                // If there is NO block above (but one below), use index 0 (Top border).
+                // If there is NO block below (but one above), use index 48 (Bottom border).
+                // Otherwise (blocks above and below), use index 24 (No borders, middle pattern).
+                if (!u && !d) srcY = 72;
+                else if (!u) srcY = 0;
                 else if (!d) srcY = 48;
-                
-                if (h <= TS) srcY = 72; 
+                else srcY = 24;
 
                 ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, cx, cy, TS, TS);
             }
@@ -242,12 +247,58 @@ export class Renderer {
             ctx.drawImage(this.bgImg, 0, -bgY - 960, VIEW_WIDTH, 960);
         }
 
+        // --- BACKGROUND LAYER MILESTONES ---
+        // Draw this BEFORE world entities so it's behind them
+        if (game.milestone.active) {
+             ctx.save();
+             
+             // Smooth fade logic
+             let opacity = 1;
+             let scale = 1;
+             const t = game.milestone.timer;
+             // @ts-ignore
+             const maxT = game.milestone.maxTimer || 3.0; // Fallback if undefined
+
+             if (t > maxT - 0.5) {
+                 opacity = (maxT - t) / 0.5; // Fade in
+                 scale = 0.8 + (1 - opacity) * 0.2; // Pop in
+             } else if (t < 0.5) {
+                 opacity = t / 0.5; // Fade out
+             } else {
+                 opacity = 1; // Hold
+             }
+
+             // Color Selection
+             const isRecord = game.milestone.text.includes("RECORD");
+             ctx.fillStyle = isRecord 
+                ? `rgba(255, 215, 0, ${opacity * 0.6})` // Gold with opacity
+                : `rgba(255, 255, 255, ${opacity * 0.15})`; // White with opacity
+
+             // Modern Sans-Serif Font
+             ctx.font = `900 ${Math.floor(64 * scale)}px sans-serif`; // Bold System Font
+             ctx.textAlign = 'center';
+             ctx.textBaseline = 'middle';
+             
+             // Shadow for depth (especially for Gold)
+             if (isRecord) {
+                 ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                 ctx.shadowBlur = 10;
+                 ctx.shadowOffsetY = 4;
+             }
+
+             // Draw in center of screen
+             ctx.fillText(game.milestone.text, this.canvas.width / 2, this.canvas.height / 3);
+             
+             ctx.shadowColor = 'transparent';
+             ctx.restore();
+        }
+
         // Camera Transform
         ctx.translate(0, Math.floor(-game.cameraY));
 
         // Draw High Score Line
         if (game.highScore > 0) {
-            const lineY = -(game.highScore * TILE_SIZE); // Adjusted to match new height calc
+            const lineY = 150 - (game.highScore * TILE_SIZE);
             if (lineY > game.cameraY && lineY < game.cameraY + game.viewHeight) {
                 ctx.save();
                 ctx.strokeStyle = '#FFD700';

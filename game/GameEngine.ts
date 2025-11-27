@@ -59,6 +59,14 @@ export class GameEngine {
     currentBg = [29, 29, 43];
     targetBg = [29, 29, 43];
     highScore = 0;
+
+    // Visual State for Canvas Rendering
+    milestone = {
+        active: false,
+        text: '',
+        timer: 0,
+        maxTimer: 3.0 // Increased for smoother fade
+    };
     
     deathRipple = {
         active: false,
@@ -70,15 +78,13 @@ export class GameEngine {
     };
     
     // Callbacks
-    onScoreUpdate: (height: number, berries: number, isRecord: boolean, time: number, pendingBerries: number) => void;
+    onScoreUpdate: (height: number, berries: number, isRecord: boolean, time: number, pendingBerries: number, speed: string) => void;
     onGameOver: (height: number, berries: number, newRecord: boolean, time: number) => void;
-    onMilestone: (text: string, isRecord: boolean) => void;
     
     constructor(
         canvas: HTMLCanvasElement, 
-        onScore: (h: number, b: number, rec: boolean, t: number, pb: number) => void,
-        onOver: (h: number, b: number, rec: boolean, t: number) => void,
-        onMile: (t: string, rec: boolean) => void
+        onScore: (h: number, b: number, rec: boolean, t: number, pb: number, s: string) => void,
+        onOver: (h: number, b: number, rec: boolean, t: number) => void
     ) {
         this.renderer = new Renderer(canvas);
         this.physics = new Physics();
@@ -86,7 +92,6 @@ export class GameEngine {
 
         this.onScoreUpdate = onScore;
         this.onGameOver = onOver;
-        this.onMilestone = onMile;
         
         const saved = localStorage.getItem('dc_highscore');
         this.highScore = saved ? parseInt(saved) : 0;
@@ -107,6 +112,13 @@ export class GameEngine {
         }
     }
 
+    triggerMilestone(text: string) {
+        this.milestone.text = text;
+        this.milestone.active = true;
+        this.milestone.maxTimer = 3.0;
+        this.milestone.timer = this.milestone.maxTimer; 
+    }
+
     initGame() {
         this.platforms = [];
         this.berries = [];
@@ -120,12 +132,14 @@ export class GameEngine {
         this.levelGen.initStartPlatform(this.solids);
         
         this.player.x = VIEW_WIDTH / 2 - 12;
-        this.player.y = -50; 
+        // Spawn on Ground (150 - 24 = 126). 
+        // 125.9 ensures we aren't embedded and physics can settle.
+        this.player.y = 125.9; 
         this.player.vx = 0;
         this.player.vy = 0;
         this.player.canDash = true;
         this.player.isDashing = false;
-        this.player.grounded = false;
+        this.player.grounded = true; // Start grounded
         this.player.highestY = 0;
         this.player.score = 0;
         this.player.followingBerries = [];
@@ -142,18 +156,24 @@ export class GameEngine {
         this.player.startTime = Date.now();
         this.player.endTime = 0;
         
+        this.milestone.active = false;
+
         const saved = localStorage.getItem('dc_highscore');
         this.highScore = saved ? parseInt(saved) : 0;
         
         this.deathRipple.active = false;
-        this.cameraY = -this.viewHeight / 2;
+        this.cameraY = -this.viewHeight / 2; // Initial camera
+        
+        // Adjust camera to look at player on start
+        this.cameraY = this.player.y - this.viewHeight * 0.7;
+
         this.state = GameState.PLAYING;
         this.currentBg = [...this.targetBg];
         this.setChapter(0);
         
         for (let i = 0; i < 10; i++) this.levelGen.generate(this.solids, this.platforms, this.crystals, this.berries, this.springs);
         
-        this.onScoreUpdate(0, 0, false, 0, 0);
+        this.onScoreUpdate(0, 0, false, 0, 0, "0.00");
     }
 
     setChapter(h: number) {
@@ -199,6 +219,11 @@ export class GameEngine {
             this.currentBg[i] += (this.targetBg[i] - this.currentBg[i]) * 2 * dt;
         }
         
+        if (this.milestone.active) {
+            this.milestone.timer -= dt;
+            if (this.milestone.timer <= 0) this.milestone.active = false;
+        }
+        
         if (this.state === GameState.TITLE) {
              this.updateSnow(dt);
              return;
@@ -242,8 +267,11 @@ export class GameEngine {
             p.dashBuffer = JUMP_BUFFER_TIME; // 80ms buffer
         }
 
-        // Camera Follow
-        const targetY = p.y - this.viewHeight * 0.25; 
+        // Camera Follow - Adjusted to keep player lower on screen (approx 70% from top)
+        // This allows seeing more terrain above.
+        // Screen top is 0. Player Y is in world space. CameraY is world Y of screen top.
+        // We want CameraY to follow so that (PlayerY - CameraY) approx equals 0.65 * ViewHeight
+        const targetY = p.y - this.viewHeight * 0.65; 
         if (targetY < this.cameraY) {
             this.cameraY += (targetY - this.cameraY) * 0.15;
         }
@@ -254,23 +282,29 @@ export class GameEngine {
         const START_Y = 150;
         const h = Math.floor(Math.max(0, (START_Y - p.y) / TILE_SIZE));
         
+        // Calculate AVERAGE speed (m/s)
+        const elapsedSec = (Date.now() - p.startTime) / 1000;
+        const avgSpeedVal = elapsedSec > 0 ? (h / elapsedSec) : 0;
+        const speedStr = avgSpeedVal.toFixed(2);
+        
         const isRecord = this.highScore > 0 && h > this.highScore;
         
         if (h > p.highestY) {
             p.highestY = h;
-            this.onScoreUpdate(h, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
+            this.onScoreUpdate(h, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length, speedStr);
             
             if (isRecord && !p.hasTriggeredRecord && h < this.highScore + 50) {
-                 this.onMilestone("NEW RECORD!!", true);
+                 this.triggerMilestone("NEW RECORD");
+                 sfx.play('record');
                  p.hasTriggeredRecord = true;
             }
             if (h >= p.lastMilestone + 500) {
                 p.lastMilestone = Math.floor(h / 500) * 500;
-                this.onMilestone(p.lastMilestone + "M", false);
+                this.triggerMilestone(p.lastMilestone + "M");
                 this.setChapter(p.lastMilestone);
             }
         } else {
-             this.onScoreUpdate(p.highestY, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length);
+             this.onScoreUpdate(p.highestY, p.score, isRecord, Date.now() - p.startTime, p.followingBerries.length, speedStr);
         }
 
         if (p.y > this.cameraY + this.viewHeight + 100) {

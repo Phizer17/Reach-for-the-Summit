@@ -32,6 +32,14 @@ export class LevelGenerator {
                r1.y + r1.h > r2.y - pad;
     }
 
+    isRegionFree(x: number, y: number, w: number, h: number, entities: any[], pad: number = 0): boolean {
+        const r = { x: x - pad, y: y - pad, w: w + pad*2, h: h + pad*2 };
+        for (const e of entities) {
+            if (this.AABB(r, e)) return false;
+        }
+        return true;
+    }
+
     checkSolidOverlap(x: number, y: number, w: number, h: number, solids: Solid[]) {
         const r = { x: x - 60, y: y - 60, w: w + 120, h: h + 120 };
         for (const s of solids) {
@@ -52,13 +60,25 @@ export class LevelGenerator {
         return false;
     }
 
-    getReachableX(width: number): number {
-        const maxDist = 250; 
+    getReachableX(width: number, heightInMeters: number): number {
+        // Dynamic horizontal reach based on difficulty
+        // Under 500M: Very restricted horizontal jumps (easier)
+        // Over 500M: Gradually widen
+        let maxDist = 180; // Default max reach ~7.5 tiles
+        if (heightInMeters < 500) {
+            maxDist = 100; // ~4 tiles max horizontal jump for beginners
+        } else if (heightInMeters < 1000) {
+            maxDist = 140;
+        }
+
         const minX = Math.max(0, this.lastX - maxDist);
         const maxX = Math.min(VIEW_WIDTH - width, this.lastX + maxDist);
         
         const range = maxX - minX;
-        if (range <= 0) return this.lastX > VIEW_WIDTH / 2 ? VIEW_WIDTH - width : 0;
+        if (range <= 0) {
+            // Fallback if squeezed against wall
+            return this.lastX > VIEW_WIDTH / 2 ? Math.max(0, this.lastX - maxDist) : Math.min(VIEW_WIDTH - width, this.lastX + maxDist);
+        }
         
         const x = minX + Math.random() * range;
         return Math.floor(x / TILE_SIZE) * TILE_SIZE;
@@ -71,94 +91,146 @@ export class LevelGenerator {
         berries: Berry[], 
         springs: Spring[]
     ) {
-        const heightFactor = Math.min(1, Math.abs(this.spawnY) / 20000); 
+        // Calculate current height in meters (approx)
+        const currentHeightMeters = Math.abs(150 - this.spawnY) / TILE_SIZE;
         
-        let minGapTiles = 4 + Math.floor(heightFactor * 2); 
-        let maxGapTiles = Math.min(9, 7 + Math.floor(heightFactor * 3)); 
+        // Difficulty Scaling
+        // 0 -> Easy, 1 -> Hard
+        const difficultyFactor = Math.min(1, currentHeightMeters / 3000); 
+        
+        // Dynamic Gap Calculation
+        let minGapTiles = 3;
+        let maxGapTiles = 5;
+
+        if (currentHeightMeters < 500) {
+            // Tutorial / Easy Section
+            minGapTiles = 3;
+            maxGapTiles = 4;
+        } else {
+            // Progressive Difficulty
+            minGapTiles = 4 + Math.floor(difficultyFactor * 2); 
+            maxGapTiles = Math.min(9, 7 + Math.floor(difficultyFactor * 3)); 
+        }
         
         let gapTiles = Math.floor(minGapTiles + Math.random() * (maxGapTiles - minGapTiles));
         let baseGap = gapTiles * TILE_SIZE;
 
-        const potentialY = this.spawnY - baseGap;
-        if (Math.abs(potentialY - this.lastSolidY) < TILE_SIZE * 3) {
-            baseGap += TILE_SIZE * 2; 
+        let potentialY = this.spawnY - baseGap;
+        
+        // Fix for Narrow Passages: Ensure the gap between the top of the previous structure
+        // and the bottom of the new structure is at least 3 tiles (72px).
+        // lastSolidY is the TOP of the previous structure.
+        // potentialY will be the BOTTOM of the new structure.
+        // The empty space is (lastSolidY - potentialY).
+        if (this.lastSolidY - potentialY < TILE_SIZE * 3) {
+            // Enforce minimum gap
+            potentialY = this.lastSolidY - (TILE_SIZE * 3);
+            baseGap = this.spawnY - potentialY;
         }
 
         if (this.lastWasSpringUp) {
-            baseGap = 200 + Math.random() * 50;
+            baseGap = Math.max(baseGap, 200 + Math.random() * 50);
+            potentialY = this.spawnY - baseGap;
         } else if (this.lastWasCrystal) {
-            if (baseGap > 180) baseGap = 120 + Math.random() * 40;
+            if (baseGap > 180) {
+                 baseGap = 120 + Math.random() * 40;
+                 potentialY = this.spawnY - baseGap;
+            }
         }
         
         this.lastWasCrystal = false;
         this.lastWasSpringUp = false;
 
-        this.spawnY -= baseGap;
+        this.spawnY = potentialY;
         const currentY = this.spawnY;
         
-        // --- 1. Crystal Generation ---
-        let cChance = 0.1;
+        // --- 1. Crystal Generation (Increased Probability) ---
+        let cChance = 0.18; // Increased from 0.1
         if (Math.random() < cChance) {
             const minX = 100;
             const maxX = VIEW_WIDTH - 100;
             const x = minX + Math.random() * (maxX - minX);
             const snappedX = Math.floor(x / TILE_SIZE) * TILE_SIZE;
             
-            if (!this.checkSolidOverlap(snappedX, currentY, 22, 22, solids)) {
-                // Resize crystal to 22x22 (slightly smaller than tile)
+            // Crystal should not overlap solids or platforms
+            if (this.isRegionFree(snappedX, currentY, 22, 22, solids) && 
+                this.isRegionFree(snappedX, currentY, 22, 22, platforms)) {
+                
                 crystals.push({ x: snappedX + 1, y: currentY + 1, w: 22, h: 22, respawnTimer: 0 });
                 this.lastWasCrystal = true;
                 return;
             }
         }
 
-        // --- 2. Solid Block Generation ---
+        // --- 2. Solid Block Generation (Natural Terrain & Side Platforms) ---
         let solidChance = 0.75;
         
         if (Math.random() < solidChance) {
-            const maxW = Math.max(2, 5 - Math.floor(heightFactor * 3)); 
+            // Core Block
+            const maxW = Math.max(2, 5 - Math.floor(difficultyFactor * 3)); 
             const wTiles = 2 + Math.floor(Math.random() * (maxW - 1));
             let w = wTiles * TILE_SIZE;
             
-            const x = this.getReachableX(w);
+            const x = this.getReachableX(w, currentHeightMeters);
             
-            const maxH = Math.max(2, 6 - Math.floor(heightFactor * 3));
+            const maxH = Math.max(2, 6 - Math.floor(difficultyFactor * 3));
             const hTiles = 2 + Math.floor(Math.random() * (maxH - 1));
             let hS = hTiles * TILE_SIZE;
             
             solids.push({ x, y: currentY - hS, w, h: hS });
-            this.lastSolidY = currentY - hS;
+            this.lastSolidY = currentY - hS; // Record Top of this solid
             this.lastX = x + w / 2; 
+
+            // NATURAL TERRAIN: "Floating Island" look
+            // Add a smaller block underneath centered
+            if (wTiles >= 3) {
+                 const subW = (wTiles - 2) * TILE_SIZE;
+                 const subX = x + TILE_SIZE;
+                 const subH = TILE_SIZE; // 1 tile high support
+                 solids.push({ x: subX, y: currentY, w: subW, h: subH });
+            }
+
+            // EDGE PLATFORMS: Prioritize extending edges with platforms
+            // 70% chance to add platforms to the sides
+            if (Math.random() < 0.7) {
+                const addLeft = Math.random() > 0.5;
+                const addRight = Math.random() > 0.5 || !addLeft; // Ensure at least one side often
+
+                if (addRight) {
+                     const platW = (1 + Math.floor(Math.random() * 2)) * TILE_SIZE;
+                     const platX = x + w;
+                     if (platX + platW < VIEW_WIDTH && this.isRegionFree(platX, currentY - hS, platW, 14, solids)) {
+                         platforms.push({ x: platX, y: currentY - hS, w: platW, h: 14 });
+                         this.lastX = platX + platW / 2; // Bias jump to platform
+                     }
+                }
+                if (addLeft) {
+                     const platW = (1 + Math.floor(Math.random() * 2)) * TILE_SIZE;
+                     const platX = x - platW;
+                     if (platX > 0 && this.isRegionFree(platX, currentY - hS, platW, 14, solids)) {
+                         platforms.push({ x: platX, y: currentY - hS, w: platW, h: 14 });
+                         // Only bias lastX if we didn't bias right
+                         if (!addRight) this.lastX = platX + platW / 2;
+                     }
+                }
+            }
             
-            // Berry on Solid (Reduced probability to 0.4)
-            if (Math.random() > 0.6) { // Reduced check
-                if (Math.random() < 0.4) { // effective 24% chance
-                    // Ensure far reach placement
+            // Berry on Solid
+            if (Math.random() > 0.6) { 
+                if (Math.random() < 0.4) { 
                     const offset = Math.random() > 0.5 ? -70 : w + 40;
                     const berryX = x + offset;
                     const berryY = currentY - hS - 20 - Math.random() * 60; 
                     
                     if (berryX > 30 && berryX < VIEW_WIDTH - 30) {
-                         // Strict air check
-                         if (!this.isSolidAt(berryX, berryY, solids) && !this.isSolidAt(berryX + 15, berryY + 15, solids)) {
-                            berries.push({ x: berryX, y: berryY, w: 30, h: 30, baseY: berryY, state: 0 });
+                         // Strictly check berry position: Must be 24px away from any solid
+                         if (this.isRegionFree(berryX, berryY, 30, 30, solids, 24) && 
+                             this.isRegionFree(berryX, berryY, 30, 30, platforms, 24) &&
+                             !this.checkSolidOverlap(berryX, berryY, 30, 30, crystals as any[])) {
+                             
+                             berries.push({ x: berryX, y: berryY, w: 30, h: 30, baseY: berryY, state: 0 });
                          }
                     }
-                }
-            }
-
-            // Attached Blocks (L-shapes)
-            const growthSteps = Math.floor(Math.random() * 3);
-            for(let i=0; i<growthSteps; i++) {
-                const side = Math.random() > 0.5 ? 1 : -1;
-                const subW = (1 + Math.floor(Math.random() * 2)) * TILE_SIZE;
-                const subH = (1 + Math.floor(Math.random() * 2)) * TILE_SIZE;
-                
-                let subX = side === 1 ? x + w : x - subW;
-                let subY = (currentY - hS) + Math.floor(Math.random() * (hTiles)) * TILE_SIZE;
-                
-                if (subX >= 0 && subX + subW <= VIEW_WIDTH) {
-                    solids.push({ x: subX, y: subY, w: subW, h: subH });
                 }
             }
 
@@ -185,16 +257,19 @@ export class LevelGenerator {
                 const springY = (currentY - hS) + Math.floor(Math.random() * hTiles) * TILE_SIZE;
                 
                 let valid = false;
-                if (springX >= 0 && springX < VIEW_WIDTH) {
-                    if (side === 'right') {
-                        if (this.isSolidAt(springX - TILE_SIZE, springY, solids)) valid = true;
-                    } else {
-                        if (this.isSolidAt(springX + TILE_SIZE, springY, solids)) valid = true;
+                if (side === 'right' && springX + TILE_SIZE > VIEW_WIDTH - 2) valid = false;
+                else if (side === 'left' && springX < 2) valid = false;
+                else if (springX >= 0 && springX < VIEW_WIDTH) {
+                    if (this.isRegionFree(springX, springY, TILE_SIZE, TILE_SIZE, solids) &&
+                        this.isRegionFree(springX, springY, TILE_SIZE, TILE_SIZE, platforms)) {
+                        
+                        if (side === 'right') {
+                            if (this.isSolidAt(springX - TILE_SIZE, springY, solids)) valid = true;
+                        } else {
+                            if (this.isSolidAt(springX + TILE_SIZE, springY, solids)) valid = true;
+                        }
                     }
                 }
-
-                // Additional check: Ensure the spring is not inside another block
-                if (valid && this.isSolidAt(springX, springY, solids)) valid = false;
 
                 if (valid) {
                     if (!this.isSolidAt(springX, springY - TILE_SIZE, solids) && !this.isSolidAt(springX, springY + TILE_SIZE, solids)) {
@@ -213,13 +288,21 @@ export class LevelGenerator {
         // --- 3. One-way Platform Generation ---
         const wTiles = 3 + Math.floor(Math.random() * 3);
         const wP = wTiles * TILE_SIZE;
-        const xP = this.getReachableX(wP);
+        const xP = this.getReachableX(wP, currentHeightMeters);
         
-        if (!this.checkSolidOverlap(xP, currentY, wP, TILE_SIZE, solids)) {
+        if (this.isRegionFree(xP, currentY, wP, 14, solids) &&
+            !this.checkSolidOverlap(xP, currentY, wP, TILE_SIZE, solids)) {
+            
             platforms.push({ x: xP, y: currentY, w: wP, h: 14 });
             this.lastX = xP + wP / 2;
+            
             if (Math.random() > 0.8) {
-                 berries.push({ x: xP + wP / 2 - 15, y: currentY - 40, w: 30, h: 30, baseY: currentY - 40, state: 0 });
+                 const bx = xP + wP / 2 - 15;
+                 const by = currentY - 40;
+                 if (this.isRegionFree(bx, by, 30, 30, solids, 24) &&
+                     this.isRegionFree(bx, by, 30, 30, platforms, 24)) {
+                     berries.push({ x: bx, y: by, w: 30, h: 30, baseY: by, state: 0 });
+                 }
             }
         }
     }

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GameEngine } from './game/GameEngine';
 import { GameState } from './types';
@@ -14,13 +15,13 @@ const App = () => {
   const [hudHeight, setHudHeight] = useState(0);
   const [hudBerries, setHudBerries] = useState(0);
   const [hudTimer, setHudTimer] = useState("00:00.00");
+  const [currentSpeed, setCurrentSpeed] = useState("0.00"); // NEW State for Speedometer
   const [pendingBerries, setPendingBerries] = useState(0);
   const [berryPop, setBerryPop] = useState(false);
   const [scorePop, setScorePop] = useState(false);
   
   const [isRecordRun, setIsRecordRun] = useState(false);
-  const [milestone, setMilestone] = useState<{ text: string, active: boolean, isRecord: boolean }>({ text: '', active: false, isRecord: false });
-  const [gameOverStats, setGameOverStats] = useState({ height: 0, berries: 0, rank: 'C', time: "00:00", speed: "0" });
+  const [gameOverStats, setGameOverStats] = useState({ height: 0, berries: 0, time: "00:00", speed: "0" });
   
   const [homeTransition, setHomeTransition] = useState(false);
   const [retryTransition, setRetryTransition] = useState(false);
@@ -38,9 +39,8 @@ const App = () => {
 
   // Callbacks Ref to hold fresh instances of handlers without re-triggering effects
   const callbacksRef = useRef({
-    onScoreUpdate: (h: number, b: number, isRecord: boolean, time: number, pb: number) => {},
-    onGameOver: (h: number, b: number, newRecord: boolean, time: number) => {},
-    onMilestone: (text: string, isRecord: boolean) => {}
+    onScoreUpdate: (h: number, b: number, isRecord: boolean, time: number, pb: number, speed: string) => {},
+    onGameOver: (h: number, b: number, newRecord: boolean, time: number) => {}
   });
 
   const inputRef = useRef({
@@ -59,7 +59,7 @@ const App = () => {
       return `${m}:${s}.${cs}`;
   };
 
-  const handleScoreUpdate = useCallback((h: number, b: number, isRecord: boolean, time: number, pb: number) => {
+  const handleScoreUpdate = useCallback((h: number, b: number, isRecord: boolean, time: number, pb: number, speed: string) => {
     setHudHeight(h);
     if (b > hudBerries) {
         setScorePop(true);
@@ -67,6 +67,7 @@ const App = () => {
     }
     setHudBerries(b);
     setIsRecordRun(isRecord);
+    setCurrentSpeed(speed); // Update Speedometer
     
     if (gameStateRef.current === GameState.PLAYING) {
       setHudTimer(formatTime(time));
@@ -80,38 +81,22 @@ const App = () => {
   }, [hudBerries, pendingBerries]);
 
   const handleGameOver = useCallback((h: number, b: number, newRecord: boolean, time: number) => {
-    let rank = "C";
-    const score = h + b * 50;
-    if (score > 1000) rank = "B";
-    if (score > 3000) rank = "A";
-    if (score > 5000) rank = "S";
-    if (score > 10000) rank = "🍓";
-    
     const sec = time / 1000;
-    const speed = sec > 0 ? (h / sec).toFixed(1) : "0";
+    const speed = sec > 0 ? (h / sec).toFixed(2) : "0.00";
     
     if (newRecord) {
         localStorage.setItem('dc_highscore', h.toString());
         setHighScore(h);
     }
 
-    setGameOverStats({ height: h, berries: b, rank, time: formatTime(time), speed });
+    setGameOverStats({ height: h, berries: b, time: formatTime(time), speed });
     setGameState(GameState.GAMEOVER);
-  }, []);
-
-  const handleMilestone = useCallback((text: string, isRecord: boolean) => {
-    setMilestone({ text, active: true, isRecord });
-    if (isRecord) sfx.play('record');
-    setTimeout(() => {
-        setMilestone(prev => ({ ...prev, active: false }));
-    }, 2500);
   }, []);
 
   // Update callbacks ref
   useEffect(() => {
     callbacksRef.current.onScoreUpdate = handleScoreUpdate;
     callbacksRef.current.onGameOver = handleGameOver;
-    callbacksRef.current.onMilestone = handleMilestone;
   });
 
   // Toggle Debug Mode
@@ -227,9 +212,8 @@ const App = () => {
     if (canvasRef.current && !engineRef.current) {
       engineRef.current = new GameEngine(
           canvasRef.current,
-          (h, b, r, t, pb) => callbacksRef.current.onScoreUpdate(h, b, r, t, pb),
-          (h, b, r, t) => callbacksRef.current.onGameOver(h, b, r, t),
-          (t, r) => callbacksRef.current.onMilestone(t, r)
+          (h, b, r, t, pb, s) => callbacksRef.current.onScoreUpdate(h, b, r, t, pb, s),
+          (h, b, r, t) => callbacksRef.current.onGameOver(h, b, r, t)
       );
       lastFrameTimeRef.current = performance.now();
       requestRef.current = requestAnimationFrame(animate);
@@ -391,37 +375,37 @@ const App = () => {
                    </div>
                </div>
                
-               <div className="flex gap-2">
-                   {/* Debug Button */}
+               <div className="flex flex-col items-end gap-2">
+                   <div className="flex gap-2">
+                       {/* Debug Button */}
+                       {gameState === GameState.PLAYING && (
+                           <button 
+                               onClick={toggleDebug}
+                               className={`pointer-events-auto p-2 rounded-lg backdrop-blur-sm transition-all ${debugMode ? 'bg-green-600/60 text-white' : 'bg-black/40 text-white/70 hover:bg-black/60 hover:text-white'}`}
+                           >
+                               🐞
+                           </button>
+                       )}
+                       
+                       {/* Pause Button (Visible only when playing) */}
+                       {gameState === GameState.PLAYING && (
+                           <button 
+                               onClick={togglePause}
+                               className="pointer-events-auto bg-black/40 hover:bg-black/60 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm transition-all"
+                           >
+                               <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                           </button>
+                       )}
+                   </div>
+
+                   {/* Speedometer */}
                    {gameState === GameState.PLAYING && (
-                       <button 
-                           onClick={toggleDebug}
-                           className={`pointer-events-auto p-2 rounded-lg backdrop-blur-sm transition-all ${debugMode ? 'bg-green-600/60 text-white' : 'bg-black/40 text-white/70 hover:bg-black/60 hover:text-white'}`}
-                       >
-                           🐞
-                       </button>
-                   )}
-                   
-                   {/* Pause Button (Visible only when playing) */}
-                   {gameState === GameState.PLAYING && (
-                       <button 
-                           onClick={togglePause}
-                           className="pointer-events-auto bg-black/40 hover:bg-black/60 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm transition-all"
-                       >
-                           <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                       </button>
+                        <div className="bg-black/50 border-2 border-white/20 rounded-lg px-2 py-1 text-xs text-gray-300 text-right backdrop-blur-sm">
+                            <span className="text-white font-bold">{currentSpeed}</span> <span className="text-[10px] text-gray-400">SPEED</span>
+                        </div>
                    )}
                </div>
            </div>
-        </div>
-
-        {/* Milestone Pop-up */}
-        <div 
-          className={`absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 text-5xl font-black pointer-events-none transition-all duration-500 z-20 whitespace-nowrap ${
-            milestone.active ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
-          } ${milestone.isRecord ? 'text-yellow-400 drop-shadow-[0_0_15px_rgba(255,215,0,0.8)]' : 'text-white/30'}`}
-        >
-          {milestone.text}
         </div>
 
         {/* Title Screen */}
@@ -481,10 +465,7 @@ const App = () => {
           <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center p-8 z-30 animate-fade-in-up">
             <div className="w-full max-w-xs bg-gray-800 border-4 border-white rounded-2xl p-6 shadow-2xl mb-6">
               <h2 className="text-4xl font-bold text-red-500 text-center mb-6 drop-shadow-sm">GAME OVER</h2>
-              <div className="grid grid-cols-2 gap-4 mb-4 text-sm text-gray-400">
-                  <div className="border-b border-dashed border-gray-600 pb-1">Height</div>
-                  <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.height}M</div>
-                  
+              <div className="grid grid-cols-2 gap-4 mb-6 text-sm text-gray-400">
                   <div className="border-b border-dashed border-gray-600 pb-1">Time</div>
                   <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.time}</div>
                   
@@ -495,9 +476,12 @@ const App = () => {
                   <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.berries}</div>
               </div>
               
-              <div className="flex justify-between items-center text-gray-400 text-lg">
-                <span>Rank</span>
-                <span className="text-yellow-400 font-black text-4xl">{gameOverStats.rank}</span>
+              {/* Highlighted Height Display */}
+              <div className="bg-black/40 rounded-xl p-4 text-center border-2 border-white/10">
+                <div className="text-gray-500 text-xs tracking-widest uppercase mb-1">Final Height</div>
+                <div className="text-yellow-400 font-black text-5xl drop-shadow-[0_2px_10px_rgba(255,215,0,0.3)]">
+                    {gameOverStats.height}M
+                </div>
               </div>
             </div>
             <div className="flex gap-4 w-full max-w-xs">
