@@ -3,6 +3,65 @@ import { GameEngine } from './game/GameEngine';
 import { GameState, GameMode } from './types';
 import { sfx } from './services/audioService';
 
+// --- LOGO COMPONENT ---
+const GameLogo = () => (
+  <div className="relative w-full max-w-md mb-6 flex justify-center animate-fade-in-up">
+      <svg viewBox="0 0 320 160" className="w-full overflow-visible drop-shadow-2xl">
+        <defs>
+            <linearGradient id="textGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#bae6fd" />
+                <stop offset="45%" stopColor="#38bdf8" />
+                <stop offset="95%" stopColor="#0369a1" />
+            </linearGradient>
+            <linearGradient id="mtnGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#818cf8" />
+                <stop offset="100%" stopColor="#312e81" />
+            </linearGradient>
+            <filter id="hardShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="4" dy="4" stdDeviation="0" floodColor="#0c4a6e"/>
+            </filter>
+        </defs>
+        
+        {/* Background Mountain */}
+        <g transform="translate(160, 90)">
+            <path d="M0 -80 L70 60 H-70 Z" fill="url(#mtnGrad)" stroke="#1e1b4b" strokeWidth="3" />
+            <path d="M0 -80 L20 60 H-20 Z" fill="rgba(0,0,0,0.2)" />
+            {/* Snow Cap */}
+            <path d="M0 -80 L15 -55 L5 -60 L0 -50 L-5 -60 L-15 -55 Z" fill="white" />
+        </g>
+
+        {/* Small Top Text */}
+        <text x="160" y="82" textAnchor="middle" fontFamily="monospace" fontWeight="bold" fontSize="16" fill="#e0f2fe" letterSpacing="1" style={{textShadow: '2px 2px 0px #1e3a8a'}} transform="rotate(-2, 160, 80)">
+            REACH FOR THE
+        </text>
+
+        {/* Main SUMMIT Text */}
+        <g transform="translate(0, 15) rotate(-3, 160, 110)">
+            {/* 3D Extrusion Layer */}
+            <text x="160" y="130" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="900" fontSize="68" fill="#0c4a6e" letterSpacing="-2" stroke="#0c4a6e" strokeWidth="8">
+                SUMMIT
+            </text>
+            {/* Main Face Layer */}
+            <text x="160" y="125" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="900" fontSize="68" fill="url(#textGrad)" stroke="white" strokeWidth="2.5" letterSpacing="-2">
+                SUMMIT
+            </text>
+            
+            {/* Snow patches on text */}
+            <path d="M55 92 Q65 88 75 92 Q70 98 65 96 Z" fill="white" transform="translate(20,0)"/>
+            <path d="M190 92 Q200 88 210 92 Q205 98 200 96 Z" fill="white" transform="translate(-10,0)"/>
+        </g>
+
+        {/* The Red Flag (Emphasizing Summit) */}
+        <g transform="translate(255, 65) rotate(5)">
+            <rect x="0" y="0" width="3" height="60" fill="#44403c" />
+            <path d="M3 2 L45 15 L3 28 Z" fill="#ef4444" stroke="#7f1d1d" strokeWidth="1" />
+            {/* Skull Detail */}
+            <circle cx="15" cy="15" r="4" fill="rgba(255,255,255,0.3)" />
+        </g>
+      </svg>
+  </div>
+);
+
 const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
@@ -437,7 +496,7 @@ const App = () => {
                    {/* Speedometer */}
                    {gameState === GameState.PLAYING && (
                         <div className="bg-black/50 border-2 border-white/20 rounded-lg px-2 py-1 text-xs text-gray-300 text-right backdrop-blur-sm">
-                            <span className="text-white font-bold">{currentSpeed}</span> <span className="text-[10px] text-gray-400">AVG</span>
+                            <span className="text-white font-bold">{currentSpeed}</span> <span className="text-[10px] text-gray-400">m/s</span>
                         </div>
                    )}
                </div>
@@ -447,7 +506,11 @@ const App = () => {
         {/* TIME ATTACK COUNTDOWN OVERLAY */}
         {countdown > 0 && gameState === GameState.PLAYING && (
              <div className="absolute inset-0 flex items-center justify-center z-50 bg-black/30 pointer-events-none">
-                 <div className="text-9xl font-black text-white drop-shadow-[0_4px_20px_rgba(0,0,0,0.5)] animate-bounce">
+                 <div 
+                   key={countdown} 
+                   className={`text-9xl font-black drop-shadow-[0_4px_20px_rgba(0,0,0,0.5)] animate-bounce transition-colors duration-500
+                   ${countdown === 3 ? 'text-red-500' : countdown === 2 ? 'text-orange-400' : 'text-yellow-300'}`}
+                 >
                      {countdown}
                  </div>
              </div>
@@ -456,20 +519,16 @@ const App = () => {
         {/* Title Screen */}
         {gameState === GameState.TITLE && (
           <div className="absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center p-8 z-30 transition-opacity">
-            <h1 className="text-4xl md:text-5xl font-bold text-center mb-2 drop-shadow-md">
-              Reach for the <span className="text-sky-400">Summit</span>
-            </h1>
-            <div className="flex gap-4 mb-8 text-sm">
-                 <div className="text-yellow-400 font-bold">BEST: {highScore}M</div>
-                 <div className="text-orange-400 font-bold">TIME: {bestTime > 0 ? formatTime(bestTime) : '--:--'}</div>
-            </div>
+            
+            <GameLogo />
             
             <div className="w-full max-w-xs space-y-4">
                  <button 
                   onClick={() => startGame(GameMode.ENDLESS)}
-                  className="w-full py-4 bg-sky-500 hover:bg-sky-400 active:translate-y-1 border-b-4 border-sky-700 rounded-xl text-xl font-bold transition-all shadow-lg"
+                  className="w-full py-4 bg-sky-500 hover:bg-sky-400 active:translate-y-1 border-b-4 border-sky-700 rounded-xl text-xl font-bold transition-all shadow-lg flex flex-col items-center leading-none justify-center gap-1"
                 >
-                  🏔 CLIMB
+                  <span>🏔 CLIMB</span>
+                  {highScore > 0 && <span className="text-xs font-bold text-sky-900 opacity-80">BEST: {highScore}M</span>}
                 </button>
                 <button 
                   onClick={() => startGame(GameMode.TIME_ATTACK)}
@@ -477,6 +536,7 @@ const App = () => {
                 >
                   <span>⏱ TIME ATTACK</span>
                   <span className="text-xs opacity-70 font-normal">Race to 1000M</span>
+                  {bestTime > 0 && <span className="text-xs font-bold text-orange-900 opacity-80">BEST: {formatTime(bestTime)}</span>}
                 </button>
             </div>
 
@@ -484,7 +544,7 @@ const App = () => {
               <p>[Arrows] Move</p>
               <p>[K/Z] Jump • [X/J] Dash</p>
             </div>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_48_polish_5</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">v1.0_0</div>
           </div>
         )}
 

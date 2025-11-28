@@ -1,6 +1,6 @@
 import { GameEngine } from '../GameEngine';
 import { Rect, Platform, Solid } from '../../types';
-import { GRAVITY, MAX_FALL_SPEED, DASH_TIME, DASH_SPEED, MAX_SPEED, ACCEL_TIME, DECEL_TIME, WALL_SLIDE_SPEED, WALL_JUMP_X, WALL_JUMP_Y, JUMP_FORCE, SPRING_SPEED_Y, SPRING_SPEED_X, SPRING_SIDE_LIFT, COLORS, TILE_SIZE } from '../../constants';
+import { GRAVITY, MAX_FALL_SPEED, DASH_TIME, DASH_SPEED, MAX_SPEED, ACCEL_TIME, DECEL_TIME, WALL_SLIDE_SPEED, WALL_JUMP_X, WALL_JUMP_Y, WALL_BOUNCE_X, WALL_BOUNCE_Y, JUMP_FORCE, SPRING_SPEED_Y, SPRING_SPEED_X, SPRING_SIDE_LIFT, COLORS, TILE_SIZE } from '../../constants';
 import { sfx } from '../../services/audioService';
 
 export class Physics {
@@ -150,15 +150,7 @@ export class Physics {
                         }
                     }
 
-                    // Move Crystals (if resting on top)
-                    for (const c of game.crystals) {
-                        if (c.y + c.h >= s.y - dy - 2 && c.y + c.h <= s.y - dy + 2 &&
-                            c.x + c.w > s.x && c.x < s.x + s.w) {
-                             c.y += dy;
-                        }
-                    }
-
-                    // Move Flags
+                    // Move Flags (if sitting on a crumbling block for some reason)
                     for (const f of game.flags) {
                         if (f.y + f.h >= s.y - dy - 2 && f.y + f.h <= s.y - dy + 2 &&
                             f.x + f.w > s.x && f.x < s.x + s.w) {
@@ -245,7 +237,7 @@ export class Physics {
 
         const p = game.player;
 
-        // Wall Bounce
+        // Wall Bounce (Super Jump)
         if (p.jumpBuffer > 0 && p.wallBounceTimer > 0) {
             let wbDir = 0;
             const checkRect = { x: p.x - 12, y: p.y, w: p.w + 24, h: p.h };
@@ -257,8 +249,16 @@ export class Physics {
             }
             if (wbDir !== 0) {
                 p.jumpBuffer = 0; p.wallBounceTimer = 0; p.isDashing = false; p.dashTimer = 0;
-                p.vy = -950; p.vx = -wbDir * WALL_JUMP_X; 
-                p.wallJumpTimer = 0.2; p.sx = 0.5; p.sy = 1.5;
+                
+                // Physics: Wall Bounce
+                // REWARD LATE TIMING: Snap vertical velocity to MAX DASH SPEED.
+                p.vy = Math.min(p.vy, -DASH_SPEED); 
+                p.vx = -wbDir * WALL_BOUNCE_X; 
+                
+                // Input lock
+                if (input.dir === wbDir || input.dir === 0) p.wallJumpTimer = 0.10; else p.wallJumpTimer = 0;
+                
+                p.sx = 0.5; p.sy = 1.5;
                 p.flashTimer = 0.1; 
                 sfx.play('bounce'); 
                 this.spawnRipple(game, p.x + p.w / 2, p.y + p.h / 2);
@@ -273,7 +273,17 @@ export class Physics {
         if (p.isDashing) {
             p.dashTimer -= dt;
             if (p.dashTimer <= 0) {
-                p.isDashing = false; p.vx *= 0.5; p.vy *= 0.5;
+                p.isDashing = false; 
+                
+                // DASH END SNAP:
+                if (!p.grounded) {
+                    if (p.vy < 0) p.vy *= 0.6; // Vertical cut
+                    
+                    // Horizontal cut
+                    if (Math.abs(p.vx) > MAX_SPEED) {
+                        p.vx = Math.sign(p.vx) * Math.max(Math.abs(p.vx) * 0.65, MAX_SPEED);
+                    }
+                }
             }
         } else {
             let inputX = input.dir;
@@ -301,7 +311,14 @@ export class Physics {
                 if (Math.abs(p.vx) <= MAX_SPEED) {
                      p.vx = targetSpeed;
                 } else {
-                     const f = Math.pow(0.02, dt); 
+                     // SMART SUPER SPEED FRICTION:
+                     let f = 0.9; // Default brake
+                     if (Math.sign(inputX) === Math.sign(p.vx)) {
+                         f = Math.pow(0.5, dt); // Retain momentum (Slide)
+                     } else {
+                         f = Math.pow(0.001, dt); // Brake hard
+                     }
+                     
                      p.vx += (targetSpeed - p.vx) * (1-f);
                 }
 
@@ -338,7 +355,9 @@ export class Physics {
                     p.vy = JUMP_FORCE; p.grounded = false; p.coyoteTimer = 0; p.jumpBuffer = 0;
                     p.sx = 0.6; p.sy = 1.4; sfx.play('jump');
                 } else if (p.onWall !== 0) {
+                    // Standard Wall Jump (Kick)
                     p.vy = WALL_JUMP_Y; p.vx = -p.onWall * WALL_JUMP_X;
+                    // Standard lock (0.15s)
                     if (input.dir === p.onWall || input.dir === 0) p.wallJumpTimer = 0.15; else p.wallJumpTimer = 0;
                     p.jumpBuffer = 0; p.onWall = 0; sfx.play('jump');
                     p.sx = 0.6; p.sy = 1.4;
@@ -408,6 +427,7 @@ export class Physics {
         const p = game.player;
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         
+        // RESTORE FLAG COLLISION AS FAILSAFE
         for (const f of game.flags) {
             if (this.AABB(rect, f)) {
                 game.completeLevel();

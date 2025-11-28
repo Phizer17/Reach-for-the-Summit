@@ -14,14 +14,23 @@ export const DECEL_TIME = 0.048;
 
 export const DASH_SPEED = 1050; 
 export const WALL_SLIDE_SPEED = 150;
-export const WALL_JUMP_X = 720; // Increased for ~5 tile push
-export const WALL_JUMP_Y = -850; // Increased height
+
+// Standard Wall Jump (Kick off) - RESTORED SMOOTH FEEL
+export const WALL_JUMP_X = 520; 
+export const WALL_JUMP_Y = -750; 
+
+// Wall Bounce (Super Wall Jump / "Ceng Qiang Tiao") - TUNED
+// High X velocity to clear distance quickly before air drag/input takes over
+// 680px/s * 0.1s lock = ~68px initial burst + momentum carry
+export const WALL_BOUNCE_X = 740; 
+export const WALL_BOUNCE_Y = -920; 
+
 export const DASH_TIME = 0.10; 
 
 // Parabolic Arc Tuning
 export const SPRING_SPEED_Y = -1050; 
-export const SPRING_SPEED_X = 750; // Increased to 750 for stronger push
-export const SPRING_SIDE_LIFT = -900; // Increased lift for better arc
+export const SPRING_SPEED_X = 750; 
+export const SPRING_SIDE_LIFT = -900; 
 
 export const JUMP_BUFFER_TIME = 0.08; // 80ms
 
@@ -33,11 +42,11 @@ export const COLORS = {
   hairIdle: '#ff004d',
   hairDash: '#fff',
   hairNoDash: '#29adff',
-  berry: '#ff2244', // Distinct bright red
+  berry: '#ff2244', 
   crystal: '#00e436',
   ghost: '#888888',
   text: '#fff',
-  flag: '#ffcc00'
+  flag: '#e74c3c' // Celeste Red for the Summit Flag
 };
 
 export const CHAPTERS = [

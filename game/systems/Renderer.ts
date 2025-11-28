@@ -327,18 +327,29 @@ export class Renderer {
             }
         }
 
-        // Draw Flags
+        // Draw Flags (RED RECTANGLE)
         game.flags.forEach(f => {
             ctx.fillStyle = COLORS.rock;
             // Pole
-            ctx.fillRect(f.x + 10, f.y, 4, 48);
-            // Flag Triangle
+            ctx.fillRect(f.x + 8, f.y, 2, 48);
+            
+            // Red Flag (Rectangular)
+            // Simulating a slight wave using a sine
+            const wave = Math.sin(Date.now() / 200) * 2;
+            
             ctx.fillStyle = COLORS.flag;
             ctx.beginPath();
-            ctx.moveTo(f.x + 14, f.y);
-            ctx.lineTo(f.x + 40, f.y + 12);
-            ctx.lineTo(f.x + 14, f.y + 24);
+            ctx.moveTo(f.x + 10, f.y + 2);
+            ctx.lineTo(f.x + 38, f.y + 2 + wave);
+            ctx.lineTo(f.x + 38, f.y + 20 + wave);
+            ctx.lineTo(f.x + 10, f.y + 20);
             ctx.fill();
+            
+            // Skull Detail (White pixels)
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.fillRect(f.x + 20, f.y + 6 + wave, 6, 6);
+            ctx.fillRect(f.x + 20, f.y + 14 + wave, 2, 2);
+            ctx.fillRect(f.x + 24, f.y + 14 + wave, 2, 2);
         });
 
         // Draw Solids

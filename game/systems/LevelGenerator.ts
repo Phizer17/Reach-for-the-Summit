@@ -83,8 +83,8 @@ const PRESETS: Record<string, string[]> = {
         "#######..........",
         "#######^.........",
         "#######..........", 
-        "...........#####.",
-        "...........#####.",
+        "..........#####..",
+        "..........#####..",
         ".....####........",
         ".....####........"
     ],
@@ -343,11 +343,14 @@ export class LevelGenerator {
         const currentHeightMeters = Math.abs(150 - this.spawnY) / TILE_SIZE;
 
         // CHECK GOAL CONDITION
-        if (gameMode === GameMode.TIME_ATTACK && currentHeightMeters >= GOAL_HEIGHT) {
-            // Spawn Goal Platform
-            const gap = 120; // fixed gap
-            const goalY = this.spawnY - gap;
+        // Trigger early (at 994M) to ensure the platform spawns AT 1000M
+        if (gameMode === GameMode.TIME_ATTACK && currentHeightMeters >= GOAL_HEIGHT - 6) {
+            // Precise Goal Position: 1000M mark
+            const goalY = 150 - (GOAL_HEIGHT * TILE_SIZE);
             
+            // Bridge the gap from previous chunk to goal
+            this.spawnBridgeIfNeeded(this.lastX, this.lastSolidY, VIEW_WIDTH/2, goalY, crystals, springs, solids);
+
             // Full width platform
             platforms.push({ x: 0, y: goalY, w: VIEW_WIDTH, h: 24 });
             
