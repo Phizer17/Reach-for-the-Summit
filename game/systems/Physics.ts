@@ -68,28 +68,43 @@ export class Physics {
         }
     }
 
-    updateSolids(game: GameEngine, dt: number) {
-        const snowLimitY = 24; // Snow fades after 1 tile
+    // Start a dash immediately (used for crystal buffering)
+    startDash(game: GameEngine, dir: number) {
+        const p = game.player;
+        let dx = 0; let dy = -1;
+        if (dir !== 0) { dx = dir * 0.707; dy = -0.707; }
+        
+        p.isDashing = true; p.canDash = false; p.dashTimer = DASH_TIME;
+        p.jumpBuffer = 0; p.coyoteTimer = 0; p.grounded = false;
+        p.vx = dx * DASH_SPEED; p.vy = dy * DASH_SPEED;
+        game.hitStop = 0.05; p.dashDx = dx; p.dashDy = dy;
+        p.sx = 0.6; p.sy = 1.4; sfx.play('dash'); game.shake = 6;
+        game.vibrate(15); 
+        p.dashBuffer = 0; 
+        p.trail = []; 
+        p.moveTimer = 0;
+        p.springTimer = 0; 
+    }
 
+    updateSolids(game: GameEngine, dt: number) {
         for (const s of game.solids) {
             if (s.crumbling) {
                 // Optimization: Only spawn snow if there is NO block directly underneath
-                // This prevents "internal" snow rendering
                 if (!s.falling && Math.random() < 0.15) { 
                     if (!this.hasSolidBelow(game, s)) {
-                        game.snow.push({
+                        game.particles.push({
                             x: s.x + Math.random() * s.w,
                             y: s.y + s.h,
                             vx: (Math.random() - 0.5) * 20,
-                            vy: 40 + Math.random() * 40,
+                            vy: 60 + Math.random() * 40,
                             size: Math.random() * 2 + 1,
-                            life: 0.5 // Short life
+                            life: 0.3, 
+                            color: '#ffffff'
                         });
                     }
                 }
 
                 if (s.shaking) {
-                    // Update main shake timer
                     s.shakeTimer = (s.shakeTimer || 0) - dt;
                     if (s.shakeTimer <= 0) {
                         s.shaking = false;
@@ -98,17 +113,58 @@ export class Physics {
                         game.vibrate(50);
                     }
 
-                    // Chain Reaction Logic
                     if (s.neighborDelay !== undefined && s.neighborDelay > 0) {
                         s.neighborDelay -= dt;
                         if (s.neighborDelay <= 0) {
                             this.triggerNeighbors(game, s);
-                            s.neighborDelay = undefined; // Triggered
+                            s.neighborDelay = undefined; 
                         }
                     }
                 } else if (s.falling) {
-                    s.vy = (s.vy || 0) + (GRAVITY * 1.5) * dt; // Fall faster than player
-                    s.y += (s.vy || 0) * dt;
+                    const fallSpeed = (s.vy || 0) + (GRAVITY * 1.5) * dt;
+                    s.vy = fallSpeed;
+                    const dy = fallSpeed * dt;
+                    s.y += dy;
+
+                    // --- CARRY ENTITIES ---
+                    // Move Springs
+                    for (const sp of game.springs) {
+                        // Check Top Attachment (Up Springs)
+                        if (sp.dir === 'up') {
+                            if (Math.abs(sp.y - (s.y - dy - sp.h)) < 2 && // Previously sitting on top
+                                sp.x + sp.w > s.x && sp.x < s.x + s.w) {
+                                sp.y += dy;
+                            }
+                        }
+                        // Check Side Attachment
+                        else if (sp.dir === 'left') {
+                            if (Math.abs((sp.x + sp.w) - s.x) < 2 && 
+                                sp.y + sp.h > s.y && sp.y < s.y + s.h) {
+                                sp.y += dy;
+                            }
+                        } else if (sp.dir === 'right') {
+                            if (Math.abs(sp.x - (s.x + s.w)) < 2 && 
+                                sp.y + sp.h > s.y && sp.y < s.y + s.h) {
+                                sp.y += dy;
+                            }
+                        }
+                    }
+
+                    // Move Crystals (if resting on top)
+                    for (const c of game.crystals) {
+                        if (c.y + c.h >= s.y - dy - 2 && c.y + c.h <= s.y - dy + 2 &&
+                            c.x + c.w > s.x && c.x < s.x + s.w) {
+                             c.y += dy;
+                        }
+                    }
+
+                    // Move Flags
+                    for (const f of game.flags) {
+                        if (f.y + f.h >= s.y - dy - 2 && f.y + f.h <= s.y - dy + 2 &&
+                            f.x + f.w > s.x && f.x < s.x + s.w) {
+                             f.y += dy;
+                        }
+                    }
                 }
             }
         }
@@ -119,7 +175,6 @@ export class Physics {
     }
 
     resolveSolidsX(p: any, solids: Solid[]) {
-        // AABB FIX: Extreme Anti-Snag & Step Up
         const trunkMargin = 7;
         const trunkTop = p.y + trunkMargin;
         const trunkBottom = p.y + p.h - trunkMargin;
@@ -130,12 +185,10 @@ export class Physics {
             if (s.y + s.h <= p.y + 4) continue;
 
             if (this.AABB(rect, s)) {
-                // Safety: If completely inside (highly unlikely with step logic, but possible on generation spawn), push out closest side
                 const cx = p.x + p.w/2;
                 const scx = s.x + s.w/2;
                 
-                // Step Up Logic: Allow stepping up even if not grounded, as long as moving slightly up or flat
-                if (p.vy >= -200) { // Allow slight upward movement to step up
+                if (p.vy >= -200) { 
                     const stepMax = 6;
                     const solidTop = s.y;
                     const diff = (p.y + p.h) - solidTop;
@@ -153,7 +206,6 @@ export class Physics {
                     p.x = s.x + s.w;
                     p.vx = 0;
                 } else {
-                    // Static overlap resolution (push away from center)
                     if (cx < scx) p.x = s.x - p.w;
                     else p.x = s.x + s.w;
                 }
@@ -189,7 +241,6 @@ export class Physics {
     }
 
     update(game: GameEngine, dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
-        // Update Solid Physics (Falling blocks)
         this.updateSolids(game, dt);
 
         const p = game.player;
@@ -216,18 +267,7 @@ export class Physics {
         }
 
         if (input.dash && p.canDash && !p.isDashing) {
-            let dx = 0; let dy = -1;
-            if (input.dir !== 0) { dx = input.dir * 0.707; dy = -0.707; }
-            p.isDashing = true; p.canDash = false; p.dashTimer = DASH_TIME;
-            p.jumpBuffer = 0; p.coyoteTimer = 0; p.grounded = false;
-            p.vx = dx * DASH_SPEED; p.vy = dy * DASH_SPEED;
-            game.hitStop = 0.05; p.dashDx = dx; p.dashDy = dy;
-            p.sx = 0.6; p.sy = 1.4; sfx.play('dash'); game.shake = 6;
-            game.vibrate(15); 
-            p.dashBuffer = 0; 
-            p.trail = []; 
-            p.moveTimer = 0;
-            p.springTimer = 0; 
+            this.startDash(game, input.dir);
         }
 
         if (p.isDashing) {
@@ -290,7 +330,6 @@ export class Physics {
             
             if (p.vy > 0 && pushingWall && !p.grounded) {
                 if (p.vy > WALL_SLIDE_SPEED) p.vy = WALL_SLIDE_SPEED;
-                // Smaller particles for wall slide
                 if (Math.random() > 0.8) this.spawnEffect(game, p.onWall === 1 ? p.x + p.w : p.x, p.y + Math.random() * p.h, '#fff', 1, 2);
             }
 
@@ -318,7 +357,6 @@ export class Physics {
             this.checkPlatformCollisions(p, game.platforms);
         }
 
-        // Resolve Y Collisions with Ceiling Corner Correction
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         for (const s of game.solids) {
             if (this.AABB(rect, s)) {
@@ -332,15 +370,13 @@ export class Physics {
                      p.vy = 0;
                      p.grounded = true;
                      
-                     // Trigger Crumbling Block
                      if (s.crumbling && !s.shaking && !s.falling) {
                          s.shaking = true;
                          s.shakeTimer = 0.5; 
-                         s.neighborDelay = 0.15; // Trigger neighbors after 0.15s
+                         s.neighborDelay = 0.15; 
                      }
                 } 
                 else if (p.vy < 0 && overlapBottom < 20) {
-                    // Ceiling Corner Correction: MUST HAPPEN BEFORE Y STOP
                     const CORNER_CORRECTION = 12;
                     let corrected = false;
                     
@@ -365,16 +401,22 @@ export class Physics {
             p.canDash = true; 
         }
 
-        this.checkEntityCollisions(game);
+        this.checkEntityCollisions(game, input);
     }
 
-    checkEntityCollisions(game: GameEngine) {
+    checkEntityCollisions(game: GameEngine, input: { dir: number }) {
         const p = game.player;
         const rect = { x: p.x, y: p.y, w: p.w, h: p.h };
         
+        for (const f of game.flags) {
+            if (this.AABB(rect, f)) {
+                game.completeLevel();
+                return; 
+            }
+        }
+
         for (const c of game.crystals) {
             if (c.respawnTimer <= 0 && this.AABB(rect, c)) {
-                // Crystal refill logic
                 const dashQueued = p.dashBuffer > 0;
                 
                 if (!p.canDash || dashQueued) {
@@ -387,9 +429,10 @@ export class Physics {
                     p.flashTimer = 0.1;
                     this.spawnEffect(game, c.x + c.w/2, c.y + c.h/2, COLORS.crystal, 5);
 
-                    // Execute Buffered Dash IMMEDIATELY
+                    // INSTANT DASH: If player pre-buffered dash, execute immediately
                     if (dashQueued) {
-                         // Buffer handled in update loop
+                         // We need dash direction. If buffered, use current input direction
+                         this.startDash(game, input.dir);
                     }
                 }
             }
@@ -409,7 +452,6 @@ export class Physics {
                 game.vibrate(30); 
                 s.animTimer = 0.2;
                 
-                // Only flash if we didn't have dash
                 if (!p.canDash) {
                     p.canDash = true; 
                     p.flashTimer = 0.1;

@@ -1,7 +1,6 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GameEngine } from './game/GameEngine';
-import { GameState } from './types';
+import { GameState, GameMode } from './types';
 import { sfx } from './services/audioService';
 
 const App = () => {
@@ -9,13 +8,14 @@ const App = () => {
   const engineRef = useRef<GameEngine | null>(null);
   const requestRef = useRef<number>(0);
   const lastFrameTimeRef = useRef<number>(0);
+  const accumulatorRef = useRef<number>(0); // New accumulator for fixed timestep
 
   // React State for UI
   const [gameState, setGameState] = useState<GameState>(GameState.TITLE);
   const [hudHeight, setHudHeight] = useState(0);
   const [hudBerries, setHudBerries] = useState(0);
   const [hudTimer, setHudTimer] = useState("00:00.00");
-  const [currentSpeed, setCurrentSpeed] = useState("0.00"); // NEW State for Speedometer
+  const [currentSpeed, setCurrentSpeed] = useState("0.00"); 
   const [pendingBerries, setPendingBerries] = useState(0);
   const [berryPop, setBerryPop] = useState(false);
   const [scorePop, setScorePop] = useState(false);
@@ -27,11 +27,16 @@ const App = () => {
   const [retryTransition, setRetryTransition] = useState(false);
   const [startTransition, setStartTransition] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  
+  // Countdown UI State
+  const [countdown, setCountdown] = useState(0);
 
   // Input Highlighting
   const [activeAction, setActiveAction] = useState<{jump: boolean, dash: boolean, left: boolean, right: boolean}>({ jump: false, dash: false, left: false, right: false });
 
   const [highScore, setHighScore] = useState(0);
+  const [bestTime, setBestTime] = useState(0);
+  const [currentGameMode, setCurrentGameMode] = useState<GameMode>(GameMode.ENDLESS);
 
   // Use a Ref to track gameState for event listeners to avoid stale closures and re-binding issues
   const gameStateRef = useRef(GameState.TITLE);
@@ -40,7 +45,8 @@ const App = () => {
   // Callbacks Ref to hold fresh instances of handlers without re-triggering effects
   const callbacksRef = useRef({
     onScoreUpdate: (h: number, b: number, isRecord: boolean, time: number, pb: number, speed: string) => {},
-    onGameOver: (h: number, b: number, newRecord: boolean, time: number) => {}
+    onGameOver: (h: number, b: number, newRecord: boolean, time: number) => {},
+    onLevelComplete: (time: number, newRecord: boolean) => {}
   });
 
   const inputRef = useRef({
@@ -67,7 +73,7 @@ const App = () => {
     }
     setHudBerries(b);
     setIsRecordRun(isRecord);
-    setCurrentSpeed(speed); // Update Speedometer
+    setCurrentSpeed(speed); 
     
     if (gameStateRef.current === GameState.PLAYING) {
       setHudTimer(formatTime(time));
@@ -84,19 +90,34 @@ const App = () => {
     const sec = time / 1000;
     const speed = sec > 0 ? (h / sec).toFixed(2) : "0.00";
     
-    if (newRecord) {
+    if (newRecord && currentGameMode === GameMode.ENDLESS) {
         localStorage.setItem('dc_highscore', h.toString());
         setHighScore(h);
     }
 
     setGameOverStats({ height: h, berries: b, time: formatTime(time), speed });
     setGameState(GameState.GAMEOVER);
-  }, []);
+  }, [currentGameMode]);
+
+  const handleLevelComplete = useCallback((time: number, newRecord: boolean) => {
+      const sec = time / 1000;
+      const speed = sec > 0 ? (1000 / sec).toFixed(2) : "0.00";
+      
+      if (newRecord && currentGameMode === GameMode.TIME_ATTACK) {
+          localStorage.setItem('dc_besttime', time.toString());
+          setBestTime(time);
+      }
+
+      setGameOverStats({ height: 1000, berries: hudBerries, time: formatTime(time), speed });
+      setIsRecordRun(newRecord); // Reuse for showing "New Record" text
+      setGameState(GameState.COMPLETE);
+  }, [hudBerries, currentGameMode]);
 
   // Update callbacks ref
   useEffect(() => {
     callbacksRef.current.onScoreUpdate = handleScoreUpdate;
     callbacksRef.current.onGameOver = handleGameOver;
+    callbacksRef.current.onLevelComplete = handleLevelComplete;
   });
 
   // Toggle Debug Mode
@@ -111,28 +132,43 @@ const App = () => {
   const animate = (time: number) => {
     requestRef.current = requestAnimationFrame(animate);
     
-    // FPS Management:
+    // --- 60FPS LOCKED TIMESTEP LOOP ---
     const delta = time - lastFrameTimeRef.current;
-    if (delta < 12) return; 
-    
     lastFrameTimeRef.current = time;
 
-    // Convert to seconds, cap at 0.06 (approx 15fps) to prevent physics explosions
-    let dt = delta / 1000;
-    if (dt > 0.06) dt = 0.06;
-      
+    // Cap delta to avoid "spiral of death" if tab is backgrounded
+    let frameTime = delta / 1000;
+    if (frameTime > 0.25) frameTime = 0.25;
+
+    accumulatorRef.current += frameTime;
+    const FIXED_STEP = 1 / 60; // Locked 60FPS physics step
+
     if (engineRef.current) {
-      engineRef.current.update(dt, {
-        dir: inputRef.current.dir,
-        jump: inputRef.current.jump,
-        dash: inputRef.current.dash,
-        jumpHeld: inputRef.current.jumpHeld
-      });
-      engineRef.current.draw();
-      
-      // Reset one-shot inputs
-      if (inputRef.current.jump) inputRef.current.jump = false;
-      if (inputRef.current.dash) inputRef.current.dash = false;
+        // Only run update if we have enough accumulated time
+        while (accumulatorRef.current >= FIXED_STEP) {
+             engineRef.current.update(FIXED_STEP, {
+                dir: inputRef.current.dir,
+                jump: inputRef.current.jump,
+                dash: inputRef.current.dash,
+                jumpHeld: inputRef.current.jumpHeld
+              });
+              
+              // Reset one-shot inputs AFTER the update consumes them
+              if (inputRef.current.jump) inputRef.current.jump = false;
+              if (inputRef.current.dash) inputRef.current.dash = false;
+
+              accumulatorRef.current -= FIXED_STEP;
+        }
+
+        // Draw every frame (interpolation could go here, but omitted for pixel style)
+        engineRef.current.draw();
+        
+        // Update React State for UI (Countdown)
+        if (engineRef.current.gameMode === GameMode.TIME_ATTACK) {
+             setCountdown(Math.ceil(engineRef.current.countdown));
+        } else {
+             setCountdown(0);
+        }
     }
   };
 
@@ -162,21 +198,22 @@ const App = () => {
       setTimeout(() => {
           sfx.init();
           if (engineRef.current) {
-            engineRef.current.initGame();
+            engineRef.current.initGame(currentGameMode);
             setGameState(GameState.PLAYING);
             setHudTimer("00:00.00");
           }
           setRetryTransition(false);
-      }, 250); // 250ms fast transition
+      }, 250); 
   };
 
   // Direct start with transition
-  const startGame = () => {
+  const startGame = (mode: GameMode) => {
+    setCurrentGameMode(mode);
     setStartTransition(true);
     setTimeout(() => {
         sfx.init();
         if (engineRef.current) {
-          engineRef.current.initGame();
+          engineRef.current.initGame(mode);
           setGameState(GameState.PLAYING);
           setHudTimer("00:00.00");
         }
@@ -196,6 +233,9 @@ const App = () => {
         setGameState(GameState.TITLE);
         const saved = localStorage.getItem('dc_highscore');
         if (saved) setHighScore(parseInt(saved));
+        const savedTime = localStorage.getItem('dc_besttime');
+        if (savedTime) setBestTime(parseInt(savedTime));
+
         setIsRecordRun(false);
         setTimeout(() => setHomeTransition(false), 100);
     }, 500);
@@ -205,12 +245,15 @@ const App = () => {
   useEffect(() => {
     const saved = localStorage.getItem('dc_highscore');
     if (saved) setHighScore(parseInt(saved));
+    const savedTime = localStorage.getItem('dc_besttime');
+    if (savedTime) setBestTime(parseInt(savedTime));
 
     if (canvasRef.current && !engineRef.current) {
       engineRef.current = new GameEngine(
           canvasRef.current,
           (h, b, r, t, pb, s) => callbacksRef.current.onScoreUpdate(h, b, r, t, pb, s),
-          (h, b, r, t) => callbacksRef.current.onGameOver(h, b, r, t)
+          (h, b, r, t) => callbacksRef.current.onGameOver(h, b, r, t),
+          (t, nr) => callbacksRef.current.onLevelComplete(t, nr)
       );
       lastFrameTimeRef.current = performance.now();
       requestRef.current = requestAnimationFrame(animate);
@@ -291,7 +334,7 @@ const App = () => {
   }, [togglePause]);
 
   const handleTouchStart = (action: 'left' | 'right' | 'jump' | 'dash') => (e: React.TouchEvent) => {
-    e.preventDefault(); // Prevent default browser behavior (selection/menu)
+    e.preventDefault(); 
     if (gameStateRef.current === GameState.PAUSED) return;
     if (action === 'left') { inputRef.current.dir = -1; setActiveAction(prev => ({...prev, left: true})); }
     if (action === 'right') { inputRef.current.dir = 1; setActiveAction(prev => ({...prev, right: true})); }
@@ -333,13 +376,9 @@ const App = () => {
       <div className="relative w-full h-full max-w-[540px] shadow-2xl">
         <canvas ref={canvasRef} className="block w-full h-full" />
 
-        {/* Slow Home Transition Overlay */}
+        {/* Transitions */}
         <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-500 ease-in-out ${homeTransition ? 'opacity-100' : 'opacity-0'}`} />
-        
-        {/* Fast Retry Transition Overlay */}
         <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-200 ease-out ${retryTransition ? 'opacity-100' : 'opacity-0'}`} />
-
-        {/* Start Game Transition Overlay */}
         <div className={`absolute inset-0 bg-black z-[100] pointer-events-none transition-opacity duration-500 ease-in-out ${startTransition ? 'opacity-100' : 'opacity-0'}`} />
 
         {/* HUD */}
@@ -384,7 +423,7 @@ const App = () => {
                            </button>
                        )}
                        
-                       {/* Pause Button (Visible only when playing) */}
+                       {/* Pause Button */}
                        {gameState === GameState.PLAYING && (
                            <button 
                                onClick={togglePause}
@@ -405,25 +444,47 @@ const App = () => {
            </div>
         </div>
 
+        {/* TIME ATTACK COUNTDOWN OVERLAY */}
+        {countdown > 0 && gameState === GameState.PLAYING && (
+             <div className="absolute inset-0 flex items-center justify-center z-50 bg-black/30 pointer-events-none">
+                 <div className="text-9xl font-black text-white drop-shadow-[0_4px_20px_rgba(0,0,0,0.5)] animate-bounce">
+                     {countdown}
+                 </div>
+             </div>
+        )}
+
         {/* Title Screen */}
         {gameState === GameState.TITLE && (
           <div className="absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center p-8 z-30 transition-opacity">
             <h1 className="text-4xl md:text-5xl font-bold text-center mb-2 drop-shadow-md">
               Reach for the <span className="text-sky-400">Summit</span>
             </h1>
-            <div className="text-yellow-400 font-bold text-xl mb-8">BEST: {highScore}M</div>
-            <div className="text-gray-400 text-center text-sm mb-8 space-y-2">
+            <div className="flex gap-4 mb-8 text-sm">
+                 <div className="text-yellow-400 font-bold">BEST: {highScore}M</div>
+                 <div className="text-orange-400 font-bold">TIME: {bestTime > 0 ? formatTime(bestTime) : '--:--'}</div>
+            </div>
+            
+            <div className="w-full max-w-xs space-y-4">
+                 <button 
+                  onClick={() => startGame(GameMode.ENDLESS)}
+                  className="w-full py-4 bg-sky-500 hover:bg-sky-400 active:translate-y-1 border-b-4 border-sky-700 rounded-xl text-xl font-bold transition-all shadow-lg"
+                >
+                  🏔 CLIMB
+                </button>
+                <button 
+                  onClick={() => startGame(GameMode.TIME_ATTACK)}
+                  className="w-full py-4 bg-orange-500 hover:bg-orange-400 active:translate-y-1 border-b-4 border-orange-700 rounded-xl text-xl font-bold transition-all shadow-lg flex flex-col items-center leading-none gap-1"
+                >
+                  <span>⏱ TIME ATTACK</span>
+                  <span className="text-xs opacity-70 font-normal">Race to 1000M</span>
+                </button>
+            </div>
+
+            <div className="text-gray-400 text-center text-sm mt-8 space-y-2">
               <p>[Arrows] Move</p>
               <p>[K/Z] Jump • [X/J] Dash</p>
-              <p className="text-xs opacity-70 mt-4">Dash Up + Jump at Wall = Super Boost!</p>
             </div>
-            <button 
-              onClick={startGame}
-              className="w-full max-w-xs py-4 bg-sky-500 hover:bg-sky-400 active:translate-y-1 border-b-4 border-sky-700 rounded-xl text-xl font-bold transition-all shadow-lg"
-            >
-              🏔 CLIMB
-            </button>
-            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_48_polish_4</div>
+            <div className="absolute bottom-4 right-4 text-xs text-white/20">Ver 0.9_48_polish_5</div>
           </div>
         )}
 
@@ -457,11 +518,14 @@ const App = () => {
           </div>
         )}
 
-        {/* Game Over Screen */}
-        {gameState === GameState.GAMEOVER && (
+        {/* Result Screen (Game Over OR Complete) */}
+        {(gameState === GameState.GAMEOVER || gameState === GameState.COMPLETE) && (
           <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center p-8 z-30 animate-fade-in-up">
-            <div className="w-full max-w-xs bg-gray-800 border-4 border-white rounded-2xl p-6 shadow-2xl mb-6">
-              <h2 className="text-4xl font-bold text-red-500 text-center mb-6 drop-shadow-sm">GAME OVER</h2>
+            <div className={`w-full max-w-xs border-4 rounded-2xl p-6 shadow-2xl mb-6 ${gameState === GameState.COMPLETE ? 'bg-orange-900/40 border-orange-400' : 'bg-gray-800 border-white'}`}>
+              <h2 className={`text-4xl font-bold text-center mb-6 drop-shadow-sm ${gameState === GameState.COMPLETE ? 'text-orange-400' : 'text-red-500'}`}>
+                  {gameState === GameState.COMPLETE ? 'COMPLETE!!' : 'GAME OVER'}
+              </h2>
+              
               <div className="grid grid-cols-2 gap-4 mb-6 text-sm text-gray-400">
                   <div className="border-b border-dashed border-gray-600 pb-1">Time</div>
                   <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.time}</div>
@@ -473,14 +537,23 @@ const App = () => {
                   <div className="border-b border-dashed border-gray-600 pb-1 text-right text-white font-bold">{gameOverStats.berries}</div>
               </div>
               
-              {/* Highlighted Height Display */}
+              {isRecordRun && (
+                  <div className="mb-4 text-center animate-pulse">
+                      <span className="bg-yellow-400 text-black font-bold px-3 py-1 rounded-full text-sm">NEW RECORD!</span>
+                  </div>
+              )}
+
+              {/* Highlighted Stat */}
               <div className="bg-black/40 rounded-xl p-4 text-center border-2 border-white/10">
-                <div className="text-gray-500 text-xs tracking-widest uppercase mb-1">Final Height</div>
+                <div className="text-gray-500 text-xs tracking-widest uppercase mb-1">
+                    {currentGameMode === GameMode.TIME_ATTACK && gameState === GameState.COMPLETE ? 'Final Time' : 'Final Height'}
+                </div>
                 <div className="text-yellow-400 font-black text-5xl drop-shadow-[0_2px_10px_rgba(255,215,0,0.3)]">
-                    {gameOverStats.height}M
+                    {currentGameMode === GameMode.TIME_ATTACK && gameState === GameState.COMPLETE ? gameOverStats.time : `${gameOverStats.height}M`}
                 </div>
               </div>
             </div>
+
             <div className="flex gap-4 w-full max-w-xs">
               <button 
                 onClick={toTitle}
@@ -501,7 +574,7 @@ const App = () => {
         )}
 
         {/* Mobile Controls Overlay */}
-        {gameState === GameState.PLAYING && (
+        {(gameState === GameState.PLAYING) && (
         <div 
           className="absolute inset-0 pointer-events-none z-40 lg:hidden flex flex-col justify-end pb-16 px-4"
           onContextMenu={(e) => e.preventDefault()} 

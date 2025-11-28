@@ -1,5 +1,5 @@
-import { VIEW_WIDTH, TILE_SIZE } from '../../constants';
-import { Platform, Solid, Berry, Crystal, Spring } from '../../types';
+import { VIEW_WIDTH, TILE_SIZE, GOAL_HEIGHT } from '../../constants';
+import { Platform, Solid, Berry, Crystal, Spring, GameMode, Flag } from '../../types';
 
 // --- ASCII MAP DEFINITIONS ---
 // # : Solid
@@ -112,6 +112,7 @@ export class LevelGenerator {
     lastWasCrystal: boolean = false;
     lastWasSpringUp: boolean = false;
     lastX: number = VIEW_WIDTH / 2;
+    goalSpawned: boolean = false;
 
     constructor() {
         this.reset();
@@ -123,6 +124,7 @@ export class LevelGenerator {
         this.lastWasCrystal = false;
         this.lastWasSpringUp = false;
         this.lastX = VIEW_WIDTH / 2;
+        this.goalSpawned = false;
     }
 
     initStartPlatform(solids: Solid[]) {
@@ -206,9 +208,6 @@ export class LevelGenerator {
         return Math.max(0, Math.min(VIEW_WIDTH - width, x));
     }
 
-    /**
-     * Spawns a bridge between the previous structure and the new structure.
-     */
     spawnBridgeIfNeeded(lastX: number, lastTopY: number, newX: number, newBottomY: number, crystals: Crystal[], springs: Spring[], solids: Solid[]) {
         const dist = Math.abs(lastX - newX);
         const vertGap = Math.abs(lastTopY - newBottomY);
@@ -265,35 +264,21 @@ export class LevelGenerator {
         return true;
     }
 
-    // --- ASCII CHUNK PARSER ---
-    spawnChunk(
-        map: string[], 
-        gridX: number, 
-        gridY: number, 
-        solids: Solid[], 
-        platforms: Platform[], 
-        crystals: Crystal[], 
-        springs: Spring[],
-        berries: Berry[],
-        mirror: boolean = false
-    ) {
+    spawnChunk(map: string[], gridX: number, gridY: number, solids: Solid[], platforms: Platform[], crystals: Crystal[], springs: Spring[], berries: Berry[], mirror: boolean = false) {
         const height = map.length;
         const width = map[0].length;
-        
         const newSolids: Solid[] = [];
 
         for (let row = 0; row < height; row++) {
             let solidRunStart = -1;
             
             for (let col = 0; col < width; col++) {
-                // Handle Mirroring
                 const actualCol = mirror ? width - 1 - col : col;
                 const char = map[row][actualCol];
 
                 const worldX = gridX + col * TILE_SIZE;
                 const worldY = gridY + row * TILE_SIZE;
 
-                // --- HORIZONTAL SOLID MERGING ---
                 if (char === '#') {
                     if (solidRunStart === -1) solidRunStart = col;
                 } else {
@@ -308,7 +293,6 @@ export class LevelGenerator {
                     }
                 }
 
-                // --- ENTITIES ---
                 const centerX = worldX + TILE_SIZE / 2;
                 const centerY = worldY + TILE_SIZE / 2;
 
@@ -316,27 +300,20 @@ export class LevelGenerator {
                     platforms.push({ x: worldX, y: worldY, w: TILE_SIZE, h: 14 });
                 } else if (char === '^') {
                     springs.push({ x: worldX, y: worldY, w: TILE_SIZE, h: TILE_SIZE, dir: 'up', animTimer: 0 });
-                    // Auto-support for spring
                     if (row + 1 >= height || map[row+1][actualCol] !== '#') {
                          newSolids.push({ x: worldX, y: worldY + TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE });
                     }
                 } else if (char === '<' || char === '>') {
-                    // Swap direction if mirrored
                     let dir: 'left' | 'right' = (char === '<') ? 'left' : 'right';
                     if (mirror) {
                         dir = (dir === 'left') ? 'right' : 'left';
                     }
-
                     springs.push({ x: worldX, y: worldY, w: TILE_SIZE, h: TILE_SIZE, dir: dir, animTimer: 0 });
-                    
-                    // Auto-support sides
                     if (dir === 'left') {
-                         // Needs solid to Right
                          if (col + 1 >= width || (mirror ? map[row][actualCol-1] : map[row][actualCol+1]) !== '#') {
                             newSolids.push({ x: worldX + TILE_SIZE, y: worldY, w: TILE_SIZE, h: TILE_SIZE });
                          }
                     } else {
-                        // Needs solid to Left
                         if (col - 1 < 0 || (mirror ? map[row][actualCol+1] : map[row][actualCol-1]) !== '#') {
                             newSolids.push({ x: worldX - TILE_SIZE, y: worldY, w: TILE_SIZE, h: TILE_SIZE });
                         }
@@ -347,7 +324,6 @@ export class LevelGenerator {
                     berries.push({ x: centerX - 15, y: centerY - 15, w: 30, h: 30, baseY: centerY - 15, state: 0 });
                 }
             }
-            
             if (solidRunStart !== -1) {
                 newSolids.push({
                     x: gridX + solidRunStart * TILE_SIZE,
@@ -357,19 +333,32 @@ export class LevelGenerator {
                 });
             }
         }
-
         solids.push(...newSolids);
         return { w: width * TILE_SIZE, h: height * TILE_SIZE, createdSolids: newSolids };
     }
 
-    generate(
-        solids: Solid[], 
-        platforms: Platform[], 
-        crystals: Crystal[], 
-        berries: Berry[], 
-        springs: Spring[]
-    ) {
+    generate(solids: Solid[], platforms: Platform[], crystals: Crystal[], berries: Berry[], springs: Spring[], flags: Flag[], gameMode: GameMode) {
+        if (this.goalSpawned) return;
+
         const currentHeightMeters = Math.abs(150 - this.spawnY) / TILE_SIZE;
+
+        // CHECK GOAL CONDITION
+        if (gameMode === GameMode.TIME_ATTACK && currentHeightMeters >= GOAL_HEIGHT) {
+            // Spawn Goal Platform
+            const gap = 120; // fixed gap
+            const goalY = this.spawnY - gap;
+            
+            // Full width platform
+            platforms.push({ x: 0, y: goalY, w: VIEW_WIDTH, h: 24 });
+            
+            // Flag
+            flags.push({ x: VIEW_WIDTH/2 - 12, y: goalY - 48, w: 24, h: 48, reached: false });
+            
+            this.goalSpawned = true;
+            this.spawnY = goalY;
+            return;
+        }
+
         const difficultyFactor = Math.min(1, currentHeightMeters / 4000); 
 
         // 1. DECIDE WHAT TO SPAWN (Standard or Preset)
@@ -421,8 +410,6 @@ export class LevelGenerator {
             // PRESET GENERATION
             const mapW = map[0].length * TILE_SIZE;
             const x = this.getReachableX(mapW, currentHeightMeters, trySwitchSide);
-            
-            // Mirror Chance 50%
             const mirror = Math.random() < 0.5;
 
             const result = this.spawnChunk(map, x, currentY, solids, platforms, crystals, springs, berries, mirror);
@@ -440,20 +427,17 @@ export class LevelGenerator {
             const xP = this.getReachableX(wP, currentHeightMeters, trySwitchSide);
             
             if (Math.random() < 0.6) {
-                // One-way Platform
                 platforms.push({ x: xP, y: currentY, w: wP, h: 14 });
                 nextSolidTopY = currentY; 
                 this.spawnBridgeIfNeeded(this.lastX, this.lastSolidY, xP + wP/2, nextBottomY, crystals, springs, solids);
 
             } else {
-                // Solid Block
                 const s = { x: xP, y: currentY, w: wP, h: TILE_SIZE * 2 };
                 solids.push(s);
                 createdSolids.push(s);
 
                 nextSolidTopY = currentY;
                 
-                // Natural Spring (25%)
                 if (Math.random() < 0.25) {
                     const validW = wP - 48; 
                     if (validW > 0) {
@@ -464,7 +448,6 @@ export class LevelGenerator {
                         }
                     }
                 }
-                // Side Spring (Rare)
                 if (Math.random() < 0.15) {
                      const side = xP > VIEW_WIDTH/2 ? 'left' : 'right';
                      const spX = side === 'left' ? xP - TILE_SIZE : xP + wP;
@@ -480,8 +463,6 @@ export class LevelGenerator {
             nextX = xP + wP / 2;
         }
 
-        // Apply Crumbling Attribute to the ENTIRE group of new solids
-        // 10% chance for the whole feature to be unstable
         if (createdSolids.length > 0) {
              if (Math.random() < 0.1) {
                  createdSolids.forEach(s => {

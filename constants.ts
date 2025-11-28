@@ -1,6 +1,6 @@
-
 export const VIEW_WIDTH = 480; // Reduced to 20 tiles for better mobile visibility
 export const TILE_SIZE = 24;
+export const GOAL_HEIGHT = 1000; // 1000M Goal for Time Attack
 
 // Physics Tuned for:
 // Max Jump Height: 120px (5 tiles)
@@ -14,8 +14,8 @@ export const DECEL_TIME = 0.048;
 
 export const DASH_SPEED = 1050; 
 export const WALL_SLIDE_SPEED = 150;
-export const WALL_JUMP_X = 650; 
-export const WALL_JUMP_Y = -750; 
+export const WALL_JUMP_X = 720; // Increased for ~5 tile push
+export const WALL_JUMP_Y = -850; // Increased height
 export const DASH_TIME = 0.10; 
 
 // Parabolic Arc Tuning
@@ -36,7 +36,8 @@ export const COLORS = {
   berry: '#ff2244', // Distinct bright red
   crystal: '#00e436',
   ghost: '#888888',
-  text: '#fff'
+  text: '#fff',
+  flag: '#ffcc00'
 };
 
 export const CHAPTERS = [

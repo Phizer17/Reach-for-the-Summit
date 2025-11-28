@@ -1,5 +1,4 @@
-
-import { GameState, Rect, Platform, Berry, Crystal, Solid, Particle, Spring, TrailPoint } from '../types';
+import { GameState, Rect, Platform, Berry, Crystal, Solid, Particle, Spring, TrailPoint, GameMode, Flag } from '../types';
 import { COLORS, CHAPTERS, VIEW_WIDTH, TILE_SIZE, DASH_SPEED, JUMP_BUFFER_TIME } from '../constants';
 import { sfx } from '../services/audioService';
 import { Physics } from './systems/Physics';
@@ -8,6 +7,7 @@ import { Renderer } from './systems/Renderer';
 
 export class GameEngine {
     state: GameState = GameState.TITLE;
+    gameMode: GameMode = GameMode.ENDLESS;
     debug: boolean = false;
     
     // Systems
@@ -49,6 +49,7 @@ export class GameEngine {
     berries: Berry[] = [];
     crystals: Crystal[] = [];
     springs: Spring[] = [];
+    flags: Flag[] = [];
     particles: Particle[] = [];
     snow: any[] = [];
     ripples: any[] = [];
@@ -59,13 +60,16 @@ export class GameEngine {
     currentBg = [29, 29, 43];
     targetBg = [29, 29, 43];
     highScore = 0;
+    bestTime = 0; 
+    
+    countdown = 0; // 3s countdown for Time Attack
 
     // Visual State for Canvas Rendering
     milestone = {
         active: false,
         text: '',
         timer: 0,
-        maxTimer: 3.0 // Increased for smoother fade
+        maxTimer: 3.0 
     };
     
     deathRipple = {
@@ -80,11 +84,13 @@ export class GameEngine {
     // Callbacks
     onScoreUpdate: (height: number, berries: number, isRecord: boolean, time: number, pendingBerries: number, speed: string) => void;
     onGameOver: (height: number, berries: number, newRecord: boolean, time: number) => void;
+    onLevelComplete: (time: number, newRecord: boolean) => void;
     
     constructor(
         canvas: HTMLCanvasElement, 
         onScore: (h: number, b: number, rec: boolean, t: number, pb: number, s: string) => void,
-        onOver: (h: number, b: number, rec: boolean, t: number) => void
+        onOver: (h: number, b: number, rec: boolean, t: number) => void,
+        onComplete: (t: number, nr: boolean) => void
     ) {
         this.renderer = new Renderer(canvas);
         this.physics = new Physics();
@@ -92,9 +98,13 @@ export class GameEngine {
 
         this.onScoreUpdate = onScore;
         this.onGameOver = onOver;
+        this.onLevelComplete = onComplete;
         
         const saved = localStorage.getItem('dc_highscore');
         this.highScore = saved ? parseInt(saved) : 0;
+
+        const savedTime = localStorage.getItem('dc_besttime');
+        this.bestTime = savedTime ? parseInt(savedTime) : 0;
         
         this.resize();
         this.initSnow();
@@ -119,12 +129,14 @@ export class GameEngine {
         this.milestone.timer = this.milestone.maxTimer; 
     }
 
-    initGame() {
+    initGame(mode: GameMode = GameMode.ENDLESS) {
+        this.gameMode = mode;
         this.platforms = [];
         this.berries = [];
         this.crystals = [];
         this.solids = [];
         this.springs = [];
+        this.flags = [];
         this.particles = [];
         this.ripples = [];
         
@@ -132,14 +144,12 @@ export class GameEngine {
         this.levelGen.initStartPlatform(this.solids);
         
         this.player.x = VIEW_WIDTH / 2 - 12;
-        // Spawn on Ground (150 - 24 = 126). 
-        // 125.9 ensures we aren't embedded and physics can settle.
         this.player.y = 125.9; 
         this.player.vx = 0;
         this.player.vy = 0;
         this.player.canDash = true;
         this.player.isDashing = false;
-        this.player.grounded = true; // Start grounded
+        this.player.grounded = true; 
         this.player.highestY = 0;
         this.player.score = 0;
         this.player.followingBerries = [];
@@ -156,23 +166,24 @@ export class GameEngine {
         this.player.startTime = Date.now();
         this.player.endTime = 0;
         
+        this.countdown = (mode === GameMode.TIME_ATTACK) ? 3.0 : 0;
+        
         this.milestone.active = false;
 
         const saved = localStorage.getItem('dc_highscore');
         this.highScore = saved ? parseInt(saved) : 0;
+        const savedTime = localStorage.getItem('dc_besttime');
+        this.bestTime = savedTime ? parseInt(savedTime) : 0;
         
         this.deathRipple.active = false;
-        this.cameraY = -this.viewHeight / 2; // Initial camera
-        
-        // Adjust camera to look at player on start
-        // Set to 0.5 (Center) to avoid UI overlap on mobile
+        this.cameraY = -this.viewHeight / 2; 
         this.cameraY = this.player.y - this.viewHeight * 0.5;
 
         this.state = GameState.PLAYING;
         this.currentBg = [...this.targetBg];
         this.setChapter(0);
         
-        for (let i = 0; i < 10; i++) this.levelGen.generate(this.solids, this.platforms, this.crystals, this.berries, this.springs);
+        for (let i = 0; i < 10; i++) this.levelGen.generate(this.solids, this.platforms, this.crystals, this.berries, this.springs, this.flags, this.gameMode);
         
         this.onScoreUpdate(0, 0, false, 0, 0, "0.00");
     }
@@ -211,10 +222,36 @@ export class GameEngine {
             if (s.x < 0) s.x = VIEW_WIDTH;
         });
     }
+    
+    completeLevel() {
+        if (this.state !== GameState.PLAYING) return;
+        this.state = GameState.COMPLETE;
+        
+        const finalTime = Date.now() - this.player.startTime;
+        const isNewRecord = this.bestTime === 0 || finalTime < this.bestTime;
+        
+        sfx.play('record'); 
+        this.vibrate(200);
+        
+        this.onLevelComplete(finalTime, isNewRecord);
+    }
 
     update(dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
         if (this.state === GameState.PAUSED) return;
         if (this.state === GameState.GAMEOVER) return;
+        if (this.state === GameState.COMPLETE) return;
+
+        // COUNTDOWN LOGIC
+        if (this.countdown > 0) {
+             this.countdown -= dt;
+             this.updateSnow(dt); // Keep snow moving for visual flair
+             if (this.countdown <= 0) {
+                 this.countdown = 0;
+                 this.player.startTime = Date.now(); // Reset start time so countdown isn't included
+             }
+             // Early return to block physics/input
+             return; 
+        }
 
         for (let i = 0; i < 3; i++) {
             this.currentBg[i] += (this.targetBg[i] - this.currentBg[i]) * 2 * dt;
@@ -268,25 +305,19 @@ export class GameEngine {
             p.dashBuffer = JUMP_BUFFER_TIME; // 80ms buffer
         }
 
-        // Camera Follow - Adjusted to keep player CENTERED (0.5)
-        // This avoids mobile controls covering the character
         const targetY = p.y - this.viewHeight * 0.5; 
         if (targetY < this.cameraY) {
             this.cameraY += (targetY - this.cameraY) * 0.15;
         }
 
-        // Height Calculation: 1 Tile (24px) = 1 Meter
-        // Baseline is 150 (Ground Level). Up is Negative.
-        // Height = (150 - currentY) / 24.
         const START_Y = 150;
         const h = Math.floor(Math.max(0, (START_Y - p.y) / TILE_SIZE));
         
-        // Calculate AVERAGE speed (m/s)
         const elapsedSec = (Date.now() - p.startTime) / 1000;
         const avgSpeedVal = elapsedSec > 0 ? (h / elapsedSec) : 0;
         const speedStr = avgSpeedVal.toFixed(2);
         
-        const isRecord = this.highScore > 0 && h > this.highScore;
+        const isRecord = this.highScore > 0 && h > this.highScore && this.gameMode === GameMode.ENDLESS;
         
         if (h > p.highestY) {
             p.highestY = h;
@@ -366,7 +397,6 @@ export class GameEngine {
             }
         });
 
-        // Combo Logic
         if (p.grounded && p.followingBerries.length > 0) {
             p.settleTimer += dt;
             if (p.settleTimer > 1.0) { 
@@ -394,7 +424,6 @@ export class GameEngine {
             }
         }
 
-        // Snapshot Trail Logic
         if (p.isDashing) {
             if (Math.random() > 0.2) {
                 p.trail.push({
@@ -414,8 +443,10 @@ export class GameEngine {
         p.history.unshift({ x: p.x, y: p.y });
         if (p.history.length > 300) p.history.length = 300;
         
-        while (this.levelGen.spawnY > this.cameraY - 200) {
-            this.levelGen.generate(this.solids, this.platforms, this.crystals, this.berries, this.springs);
+        // --- INFINITE LOOP FIX ---
+        // Stop generating if we've passed the goal spawn point
+        while (this.levelGen.spawnY > this.cameraY - 200 && !this.levelGen.goalSpawned) {
+            this.levelGen.generate(this.solids, this.platforms, this.crystals, this.berries, this.springs, this.flags, this.gameMode);
         }
         
         const dl = this.cameraY + this.viewHeight + 100;
@@ -424,6 +455,7 @@ export class GameEngine {
         this.springs = this.springs.filter(o => o.y < dl);
         this.berries = this.berries.filter(o => o.state !== 2 && (o.y < dl || o.state === 1));
         this.crystals = this.crystals.filter(o => o.y < dl);
+        this.flags = this.flags.filter(o => o.y < dl);
         
         this.crystals.forEach(c => {
              const o = c.respawnTimer;

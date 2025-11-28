@@ -138,9 +138,6 @@ export class Renderer {
              ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
              ctx.rotate(angle + Math.PI / 2);
              
-             // Color indicates dash readiness
-             // If dashing, show white; if can dash, white; if no dash, blueish
-             // Per request: Always show.
              ctx.fillStyle = p.canDash ? '#ffffff' : '#8cd5ff';
              ctx.globalAlpha = p.isDashing ? 0.3 : 0.6; // Fade out slightly if actually dashing
              ctx.beginPath();
@@ -265,7 +262,7 @@ export class Renderer {
              let scale = 1;
              const t = game.milestone.timer;
              // @ts-ignore
-             const maxT = game.milestone.maxTimer || 3.0; // Fallback if undefined
+             const maxT = game.milestone.maxTimer || 3.0; 
 
              if (t > maxT - 0.5) {
                  opacity = (maxT - t) / 0.5; // Fade in
@@ -278,22 +275,28 @@ export class Renderer {
 
              // Color Selection
              const isRecord = game.milestone.text.includes("RECORD");
-             ctx.fillStyle = isRecord 
-                ? `rgba(255, 215, 0, ${opacity * 0.6})` // Gold with opacity
-                : `rgba(255, 255, 255, ${opacity * 0.15})`; // White with opacity
+             
+             if (isRecord) {
+                 // Shimmer Effect for Record
+                 const shimmer = (Math.sin(Date.now() / 100) + 1) / 2;
+                 const r = 255;
+                 const g = 215 + (40 * shimmer);
+                 const b = 0 + (100 * shimmer);
+                 ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${opacity * 0.8})`;
+                 
+                 ctx.shadowColor = `rgba(255, 215, 0, ${opacity})`;
+                 ctx.shadowBlur = 20 + 10 * shimmer;
+                 ctx.shadowOffsetY = 4;
+             } else {
+                 ctx.fillStyle = `rgba(255, 255, 255, ${opacity * 0.15})`;
+                 ctx.shadowColor = 'transparent';
+             }
 
              // Modern Sans-Serif Font
              ctx.font = `900 ${Math.floor(64 * scale)}px sans-serif`; // Bold System Font
              ctx.textAlign = 'center';
              ctx.textBaseline = 'middle';
              
-             // Shadow for depth (especially for Gold)
-             if (isRecord) {
-                 ctx.shadowColor = 'rgba(0,0,0,0.5)';
-                 ctx.shadowBlur = 10;
-                 ctx.shadowOffsetY = 4;
-             }
-
              // Draw in center of screen
              ctx.fillText(game.milestone.text, this.canvas.width / 2, this.canvas.height / 3);
              
@@ -323,6 +326,20 @@ export class Renderer {
                 ctx.restore();
             }
         }
+
+        // Draw Flags
+        game.flags.forEach(f => {
+            ctx.fillStyle = COLORS.rock;
+            // Pole
+            ctx.fillRect(f.x + 10, f.y, 4, 48);
+            // Flag Triangle
+            ctx.fillStyle = COLORS.flag;
+            ctx.beginPath();
+            ctx.moveTo(f.x + 14, f.y);
+            ctx.lineTo(f.x + 40, f.y + 12);
+            ctx.lineTo(f.x + 14, f.y + 24);
+            ctx.fill();
+        });
 
         // Draw Solids
         game.solids.forEach(s => {
@@ -457,7 +474,7 @@ export class Renderer {
         ctx.restore(); // Pop Camera 
 
         // Draw Abyss Gradient
-        if (game.state === GameState.PLAYING) {
+        if (game.state === GameState.PLAYING || game.state === GameState.COMPLETE) {
              const grad = ctx.createLinearGradient(0, game.viewHeight - 150, 0, game.viewHeight);
              grad.addColorStop(0, "rgba(0,0,0,0)");
              grad.addColorStop(1, "rgba(0,0,0,1)");

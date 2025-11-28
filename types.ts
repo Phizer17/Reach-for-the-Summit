@@ -3,7 +3,13 @@ export enum GameState {
   PLAYING = 'PLAYING',
   PAUSED = 'PAUSED',
   DYING = 'DYING',
-  GAMEOVER = 'GAMEOVER'
+  GAMEOVER = 'GAMEOVER',
+  COMPLETE = 'COMPLETE' // New state for Time Attack victory
+}
+
+export enum GameMode {
+  ENDLESS = 'ENDLESS',
+  TIME_ATTACK = 'TIME_ATTACK'
 }
 
 export interface Point {
@@ -47,6 +53,8 @@ export interface PlayerState extends Rect {
   blinkTimer: number; 
   moveTimer: number; 
   springTimer: number; // New: Low friction timer
+  startTime: number;
+  endTime: number;
 }
 
 export interface Platform extends Rect {}
@@ -72,6 +80,10 @@ export interface Berry extends Rect {
 
 export interface Crystal extends Rect {
   respawnTimer: number;
+}
+
+export interface Flag extends Rect {
+    reached: boolean;
 }
 
 export interface Particle {
