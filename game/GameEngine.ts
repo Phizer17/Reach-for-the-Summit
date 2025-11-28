@@ -165,7 +165,8 @@ export class GameEngine {
         this.cameraY = -this.viewHeight / 2; // Initial camera
         
         // Adjust camera to look at player on start
-        this.cameraY = this.player.y - this.viewHeight * 0.7;
+        // Set to 0.5 (Center) to avoid UI overlap on mobile
+        this.cameraY = this.player.y - this.viewHeight * 0.5;
 
         this.state = GameState.PLAYING;
         this.currentBg = [...this.targetBg];
@@ -267,11 +268,9 @@ export class GameEngine {
             p.dashBuffer = JUMP_BUFFER_TIME; // 80ms buffer
         }
 
-        // Camera Follow - Adjusted to keep player lower on screen (approx 70% from top)
-        // This allows seeing more terrain above.
-        // Screen top is 0. Player Y is in world space. CameraY is world Y of screen top.
-        // We want CameraY to follow so that (PlayerY - CameraY) approx equals 0.65 * ViewHeight
-        const targetY = p.y - this.viewHeight * 0.65; 
+        // Camera Follow - Adjusted to keep player CENTERED (0.5)
+        // This avoids mobile controls covering the character
+        const targetY = p.y - this.viewHeight * 0.5; 
         if (targetY < this.cameraY) {
             this.cameraY += (targetY - this.cameraY) * 0.15;
         }

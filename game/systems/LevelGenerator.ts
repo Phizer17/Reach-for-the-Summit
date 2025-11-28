@@ -1,6 +1,110 @@
-
 import { VIEW_WIDTH, TILE_SIZE } from '../../constants';
 import { Platform, Solid, Berry, Crystal, Spring } from '../../types';
+
+// --- ASCII MAP DEFINITIONS ---
+// # : Solid
+// = : Platform
+// ^ : Spring Up
+// < : Spring Left (Attached to Right Wall)
+// > : Spring Right (Attached to Left Wall)
+// * : Crystal
+// @ : Berry
+// . : Air
+
+const PRESETS: Record<string, string[]> = {
+    'CHIMNEY': [
+        "#####...*...#####",
+        "#####.......#####",
+        "#####.......#####",
+        "#####.......#####",
+        "#####.......#####",
+        "#####.......#####"
+    ],
+    'WALL_GAUNTLET': [
+        "##.............##",
+        "##.............##",
+        "##.............##",
+        "##......*......##",
+        "##.............##",
+        "##.............##"
+    ],
+    'DASH_CROSS': [
+        "###...........###",
+        "###.....*.....###",
+        "###...........###"
+    ],
+    'STAIRS_RIGHT': [
+        "##...............",
+        "##...............",
+        "..##.............",
+        "..##.............",
+        "....##...........",
+        "....##...........",
+        "......##.........",
+        "......##........."
+    ],
+    'STAIRS_LEFT': [
+        "...............##",
+        "...............##",
+        ".............##..",
+        ".............##..",
+        "...........##....",
+        "...........##....",
+        ".........##......",
+        ".........##......"
+    ],
+    'FLOATING_ISLAND': [
+        "........*........",
+        ".................",
+        "....==.....==....",
+        "........#........",
+        ".......###.......",
+        "......#####......"
+    ],
+    'PYRAMID': [
+        ".....##...##.....",
+        "....###...###....",
+        "...###..*..###...",
+        "..###.......###..",
+        ".###.........###.",
+        "###...........###",
+        "###...........###"
+    ],
+    'ARCH': [
+        "#######...#######",
+        "###...........###",
+        "##.............##",
+        "#.......*.......#",
+        "#...............#",
+        "#...====.====...#"
+    ],
+    'ZIGZAG': [
+        "#######..........",
+        "#######..........",
+        "#######^.........",
+        "#######..........", 
+        "..........#######",
+        "..........#######",
+        "...#######.......",
+        "...#######......."
+    ],
+    'OVERHANG': [
+        "#######...#######",
+        "#######...#######",
+        "#...............#",
+        "#>.............<#", 
+        "#...............#",
+        "........*........"
+    ],
+    'FLOATING_WALL': [
+        ".................",
+        "........#........",
+        "........#........",
+        "........#........",
+        "........#........",
+        "........#........"
+    ]
+};
 
 export class LevelGenerator {
     spawnY: number = 0;
@@ -32,56 +136,230 @@ export class LevelGenerator {
                r1.y + r1.h > r2.y - pad;
     }
 
-    isRegionFree(x: number, y: number, w: number, h: number, entities: any[], pad: number = 0): boolean {
+    isRegionFree(x: number, y: number, w: number, h: number, entities: any[], pad: number = 0, ignoreEntity: any = null): boolean {
         const r = { x: x - pad, y: y - pad, w: w + pad*2, h: h + pad*2 };
         for (const e of entities) {
+            if (e === ignoreEntity) continue;
             if (this.AABB(r, e)) return false;
         }
         return true;
     }
 
-    checkSolidOverlap(x: number, y: number, w: number, h: number, solids: Solid[]) {
-        const r = { x: x - 60, y: y - 60, w: w + 120, h: h + 120 };
-        for (const s of solids) {
-            if (this.AABB(r, s)) return true;
-        }
-        return false;
-    }
-
-    isSolidAt(x: number, y: number, solids: Solid[]): boolean {
-        const checkX = x + TILE_SIZE / 2;
-        const checkY = y + TILE_SIZE / 2;
-        for (const s of solids) {
-            if (checkX > s.x && checkX < s.x + s.w &&
-                checkY > s.y && checkY < s.y + s.h) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    getReachableX(width: number, heightInMeters: number): number {
-        // Dynamic horizontal reach based on difficulty
-        // Under 500M: Very restricted horizontal jumps (easier)
-        // Over 500M: Gradually widen
-        let maxDist = 180; // Default max reach ~7.5 tiles
+    getReachableX(width: number, heightInMeters: number, trySwitchSide: boolean = false): number {
+        let maxDist = 200; 
         if (heightInMeters < 500) {
-            maxDist = 100; // ~4 tiles max horizontal jump for beginners
+            maxDist = 120; 
         } else if (heightInMeters < 1000) {
-            maxDist = 140;
+            maxDist = 160;
         }
 
+        if (trySwitchSide) {
+            maxDist = 320; 
+        }
+
+        // 1. Basic Reachability Range
         const minX = Math.max(0, this.lastX - maxDist);
         const maxX = Math.min(VIEW_WIDTH - width, this.lastX + maxDist);
         
-        const range = maxX - minX;
-        if (range <= 0) {
-            // Fallback if squeezed against wall
-            return this.lastX > VIEW_WIDTH / 2 ? Math.max(0, this.lastX - maxDist) : Math.min(VIEW_WIDTH - width, this.lastX + maxDist);
+        // 2. Determine target X
+        let x;
+        if (trySwitchSide) {
+             // Force jump across screen center
+             if (this.lastX < VIEW_WIDTH / 2) {
+                 // Switch Left -> Right
+                 // Target range: [Center + 20, VIEW_WIDTH - width]
+                 const start = (VIEW_WIDTH / 2) + 20;
+                 const end = VIEW_WIDTH - width;
+                 
+                 if (end > start) {
+                     x = start + Math.random() * (end - start);
+                 } else {
+                     x = VIEW_WIDTH - width; // Fallback to edge if object too big
+                 }
+             } else {
+                 // Switch Right -> Left
+                 // Target range: [0, Center - width - 20]
+                 const start = 0;
+                 const end = (VIEW_WIDTH / 2) - width - 20;
+                 
+                 if (end > start) {
+                    x = start + Math.random() * (end - start);
+                 } else {
+                    x = 0; // Fallback
+                 }
+             }
+        } else {
+             // Standard constrained random
+             const range = maxX - minX;
+             if (range > 0) {
+                 x = minX + Math.random() * range;
+             } else {
+                 // Fallback if constrained too tight
+                 x = this.lastX > VIEW_WIDTH / 2 
+                     ? Math.max(0, this.lastX - maxDist) 
+                     : Math.min(VIEW_WIDTH - width, this.lastX + maxDist);
+             }
         }
+
+        // 3. HARD CLAMP to ensure we are NEVER out of bounds
+        // This fixes the "terrain generated outside scene" bug
+        return Math.max(0, Math.min(VIEW_WIDTH - width, x));
+    }
+
+    /**
+     * Spawns a bridge between the previous structure and the new structure.
+     */
+    spawnBridgeIfNeeded(lastX: number, lastTopY: number, newX: number, newBottomY: number, crystals: Crystal[], springs: Spring[], solids: Solid[]) {
+        const dist = Math.abs(lastX - newX);
+        const vertGap = Math.abs(lastTopY - newBottomY);
+
+        // Only spawn bridge if horizontal gap is significant
+        if (dist > 160) { 
+            const midX = (lastX + newX) / 2;
+            const midY = (lastTopY + newBottomY) / 2; 
+            
+            // If the vertical gap is too small, a solid block will make it cramped.
+            const canSpawnSolid = vertGap > 180; 
+
+            if (!canSpawnSolid || Math.random() < 0.7) { 
+                // 70% chance (or forced if tight gap): Floating Crystal
+                this.trySpawnCrystal(midX - 11, midY, crystals, springs, solids);
+            } else {
+                 // 30% chance: Floating Island
+                 const blockW = 48;
+                 const blockH = 24;
+                 const blockX = midX - blockW / 2;
+                 const blockY = midY; 
+                 
+                 if (this.isRegionFree(blockX, blockY, blockW, blockH, springs, 24) && 
+                     this.isRegionFree(blockX, blockY, blockW, blockH, crystals, 24) &&
+                     this.isRegionFree(blockX, blockY, blockW, blockH, solids, 24)) {
+                     const solid = { x: blockX, y: blockY, w: blockW, h: blockH };
+                     solids.push(solid);
+                     
+                     // Chance to make bridge crumbling (20%)
+                     if (Math.random() < 0.2) {
+                         solid['crumbling'] = true;
+                     }
+                 }
+            }
+        }
+    }
+
+    trySpawnCrystal(x: number, y: number, crystals: Crystal[], springs: Spring[] = [], solids: Solid[] = []): boolean {
+        for (const c of crystals) {
+            const dx = c.x - x;
+            const dy = c.y - y;
+            if (Math.sqrt(dx*dx + dy*dy) < 120) return false;
+        }
+        for (const s of springs) {
+            const dx = (s.x + s.w/2) - (x + 11);
+            const dy = (s.y + s.h/2) - (y + 11);
+            if (Math.abs(dx) < 30 && Math.abs(dy) < 30) return false;
+        }
+        for (const s of solids) {
+             const r = { x: x, y: y, w: 22, h: 22 };
+             if (this.AABB(r, s)) return false;
+        }
+        crystals.push({ x, y, w: 22, h: 22, respawnTimer: 0 });
+        return true;
+    }
+
+    // --- ASCII CHUNK PARSER ---
+    spawnChunk(
+        map: string[], 
+        gridX: number, 
+        gridY: number, 
+        solids: Solid[], 
+        platforms: Platform[], 
+        crystals: Crystal[], 
+        springs: Spring[],
+        berries: Berry[],
+        mirror: boolean = false
+    ) {
+        const height = map.length;
+        const width = map[0].length;
         
-        const x = minX + Math.random() * range;
-        return Math.floor(x / TILE_SIZE) * TILE_SIZE;
+        const newSolids: Solid[] = [];
+
+        for (let row = 0; row < height; row++) {
+            let solidRunStart = -1;
+            
+            for (let col = 0; col < width; col++) {
+                // Handle Mirroring
+                const actualCol = mirror ? width - 1 - col : col;
+                const char = map[row][actualCol];
+
+                const worldX = gridX + col * TILE_SIZE;
+                const worldY = gridY + row * TILE_SIZE;
+
+                // --- HORIZONTAL SOLID MERGING ---
+                if (char === '#') {
+                    if (solidRunStart === -1) solidRunStart = col;
+                } else {
+                    if (solidRunStart !== -1) {
+                        newSolids.push({
+                            x: gridX + solidRunStart * TILE_SIZE,
+                            y: gridY + row * TILE_SIZE,
+                            w: (col - solidRunStart) * TILE_SIZE,
+                            h: TILE_SIZE
+                        });
+                        solidRunStart = -1;
+                    }
+                }
+
+                // --- ENTITIES ---
+                const centerX = worldX + TILE_SIZE / 2;
+                const centerY = worldY + TILE_SIZE / 2;
+
+                if (char === '=') {
+                    platforms.push({ x: worldX, y: worldY, w: TILE_SIZE, h: 14 });
+                } else if (char === '^') {
+                    springs.push({ x: worldX, y: worldY, w: TILE_SIZE, h: TILE_SIZE, dir: 'up', animTimer: 0 });
+                    // Auto-support for spring
+                    if (row + 1 >= height || map[row+1][actualCol] !== '#') {
+                         newSolids.push({ x: worldX, y: worldY + TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE });
+                    }
+                } else if (char === '<' || char === '>') {
+                    // Swap direction if mirrored
+                    let dir: 'left' | 'right' = (char === '<') ? 'left' : 'right';
+                    if (mirror) {
+                        dir = (dir === 'left') ? 'right' : 'left';
+                    }
+
+                    springs.push({ x: worldX, y: worldY, w: TILE_SIZE, h: TILE_SIZE, dir: dir, animTimer: 0 });
+                    
+                    // Auto-support sides
+                    if (dir === 'left') {
+                         // Needs solid to Right
+                         if (col + 1 >= width || (mirror ? map[row][actualCol-1] : map[row][actualCol+1]) !== '#') {
+                            newSolids.push({ x: worldX + TILE_SIZE, y: worldY, w: TILE_SIZE, h: TILE_SIZE });
+                         }
+                    } else {
+                        // Needs solid to Left
+                        if (col - 1 < 0 || (mirror ? map[row][actualCol+1] : map[row][actualCol-1]) !== '#') {
+                            newSolids.push({ x: worldX - TILE_SIZE, y: worldY, w: TILE_SIZE, h: TILE_SIZE });
+                        }
+                    }
+                } else if (char === '*') {
+                    this.trySpawnCrystal(centerX - 11, centerY - 11, crystals, springs, solids.concat(newSolids));
+                } else if (char === '@') {
+                    berries.push({ x: centerX - 15, y: centerY - 15, w: 30, h: 30, baseY: centerY - 15, state: 0 });
+                }
+            }
+            
+            if (solidRunStart !== -1) {
+                newSolids.push({
+                    x: gridX + solidRunStart * TILE_SIZE,
+                    y: gridY + row * TILE_SIZE,
+                    w: (width - solidRunStart) * TILE_SIZE,
+                    h: TILE_SIZE
+                });
+            }
+        }
+
+        solids.push(...newSolids);
+        return { w: width * TILE_SIZE, h: height * TILE_SIZE, createdSolids: newSolids };
     }
 
     generate(
@@ -91,219 +369,128 @@ export class LevelGenerator {
         berries: Berry[], 
         springs: Spring[]
     ) {
-        // Calculate current height in meters (approx)
         const currentHeightMeters = Math.abs(150 - this.spawnY) / TILE_SIZE;
-        
-        // Difficulty Scaling
-        // 0 -> Easy, 1 -> Hard
-        const difficultyFactor = Math.min(1, currentHeightMeters / 3000); 
-        
-        // Dynamic Gap Calculation
-        let minGapTiles = 3;
-        let maxGapTiles = 5;
+        const difficultyFactor = Math.min(1, currentHeightMeters / 4000); 
 
-        if (currentHeightMeters < 500) {
-            // Tutorial / Easy Section
-            minGapTiles = 3;
-            maxGapTiles = 4;
+        // 1. DECIDE WHAT TO SPAWN (Standard or Preset)
+        let techChance = 0.4 + (difficultyFactor * 0.4); 
+        if (currentHeightMeters < 300) techChance = 0.15;
+        const isPreset = Math.random() < techChance;
+
+        // 2. DETERMINE OBJECT HEIGHT & GAP
+        let objectHeight = 0;
+        let map: string[] = [];
+        let gapTiles = 0;
+        let createdSolids: Solid[] = [];
+        
+        if (isPreset) {
+            const keys = Object.keys(PRESETS);
+            const mapKey = keys[Math.floor(Math.random() * keys.length)];
+            map = PRESETS[mapKey];
+            objectHeight = map.length * TILE_SIZE;
+            
+            // Presets get larger gaps
+            const minGap = 5 + Math.floor(difficultyFactor * 2);
+            const maxGap = 9 + Math.floor(difficultyFactor * 3);
+            gapTiles = Math.floor(minGap + Math.random() * (maxGap - minGap));
         } else {
-            // Progressive Difficulty
-            minGapTiles = 4 + Math.floor(difficultyFactor * 2); 
-            maxGapTiles = Math.min(9, 7 + Math.floor(difficultyFactor * 3)); 
-        }
-        
-        let gapTiles = Math.floor(minGapTiles + Math.random() * (maxGapTiles - minGapTiles));
-        let baseGap = gapTiles * TILE_SIZE;
-
-        let potentialY = this.spawnY - baseGap;
-        
-        // Fix for Narrow Passages: Ensure the gap between the top of the previous structure
-        // and the bottom of the new structure is at least 3 tiles (72px).
-        // lastSolidY is the TOP of the previous structure.
-        // potentialY will be the BOTTOM of the new structure.
-        // The empty space is (lastSolidY - potentialY).
-        if (this.lastSolidY - potentialY < TILE_SIZE * 3) {
-            // Enforce minimum gap
-            potentialY = this.lastSolidY - (TILE_SIZE * 3);
-            baseGap = this.spawnY - potentialY;
-        }
-
-        if (this.lastWasSpringUp) {
-            baseGap = Math.max(baseGap, 200 + Math.random() * 50);
-            potentialY = this.spawnY - baseGap;
-        } else if (this.lastWasCrystal) {
-            if (baseGap > 180) {
-                 baseGap = 120 + Math.random() * 40;
-                 potentialY = this.spawnY - baseGap;
-            }
-        }
-        
-        this.lastWasCrystal = false;
-        this.lastWasSpringUp = false;
-
-        this.spawnY = potentialY;
-        const currentY = this.spawnY;
-        
-        // --- 1. Crystal Generation (Increased Probability) ---
-        let cChance = 0.18; // Increased from 0.1
-        if (Math.random() < cChance) {
-            const minX = 100;
-            const maxX = VIEW_WIDTH - 100;
-            const x = minX + Math.random() * (maxX - minX);
-            const snappedX = Math.floor(x / TILE_SIZE) * TILE_SIZE;
+            objectHeight = TILE_SIZE * 2; 
             
-            // Crystal should not overlap solids or platforms
-            if (this.isRegionFree(snappedX, currentY, 22, 22, solids) && 
-                this.isRegionFree(snappedX, currentY, 22, 22, platforms)) {
+            // Standard terrain gets SMALLER gaps (3-6 tiles) for tighter flow
+            const minGap = 3 + Math.floor(difficultyFactor * 1.5);
+            const maxGap = 5 + Math.floor(difficultyFactor * 2); 
+            gapTiles = Math.floor(minGap + Math.random() * (maxGap - minGap));
+        }
+
+        const gapPx = gapTiles * TILE_SIZE;
+
+        // 3. CALCULATE NEW POSITION
+        const nextBottomY = this.lastSolidY - gapPx;
+        const nextTopY = nextBottomY - objectHeight;
+
+        this.spawnY = nextTopY;
+        const currentY = nextTopY;
+        
+        const trySwitchSide = Math.random() < (0.4 + difficultyFactor * 0.2);
+
+        // 4. SPAWN IT
+        let nextSolidTopY = currentY; 
+        let nextX = this.lastX;
+
+        if (isPreset) {
+            // PRESET GENERATION
+            const mapW = map[0].length * TILE_SIZE;
+            const x = this.getReachableX(mapW, currentHeightMeters, trySwitchSide);
+            
+            // Mirror Chance 50%
+            const mirror = Math.random() < 0.5;
+
+            const result = this.spawnChunk(map, x, currentY, solids, platforms, crystals, springs, berries, mirror);
+            createdSolids = result.createdSolids;
+
+            this.spawnBridgeIfNeeded(this.lastX, this.lastSolidY, x + mapW/2, nextBottomY, crystals, springs, solids);
+
+            nextSolidTopY = currentY; 
+            nextX = x + mapW / 2;
+
+        } else {
+            // STANDARD PLATFORM GENERATION
+            const wTiles = 3 + Math.floor(Math.random() * 4); 
+            const wP = wTiles * TILE_SIZE;
+            const xP = this.getReachableX(wP, currentHeightMeters, trySwitchSide);
+            
+            if (Math.random() < 0.6) {
+                // One-way Platform
+                platforms.push({ x: xP, y: currentY, w: wP, h: 14 });
+                nextSolidTopY = currentY; 
+                this.spawnBridgeIfNeeded(this.lastX, this.lastSolidY, xP + wP/2, nextBottomY, crystals, springs, solids);
+
+            } else {
+                // Solid Block
+                const s = { x: xP, y: currentY, w: wP, h: TILE_SIZE * 2 };
+                solids.push(s);
+                createdSolids.push(s);
+
+                nextSolidTopY = currentY;
                 
-                crystals.push({ x: snappedX + 1, y: currentY + 1, w: 22, h: 22, respawnTimer: 0 });
-                this.lastWasCrystal = true;
-                return;
-            }
-        }
-
-        // --- 2. Solid Block Generation (Natural Terrain & Side Platforms) ---
-        let solidChance = 0.75;
-        
-        if (Math.random() < solidChance) {
-            // Core Block
-            const maxW = Math.max(2, 5 - Math.floor(difficultyFactor * 3)); 
-            const wTiles = 2 + Math.floor(Math.random() * (maxW - 1));
-            let w = wTiles * TILE_SIZE;
-            
-            const x = this.getReachableX(w, currentHeightMeters);
-            
-            const maxH = Math.max(2, 6 - Math.floor(difficultyFactor * 3));
-            const hTiles = 2 + Math.floor(Math.random() * (maxH - 1));
-            let hS = hTiles * TILE_SIZE;
-            
-            solids.push({ x, y: currentY - hS, w, h: hS });
-            this.lastSolidY = currentY - hS; // Record Top of this solid
-            this.lastX = x + w / 2; 
-
-            // NATURAL TERRAIN: "Floating Island" look
-            // Add a smaller block underneath centered
-            if (wTiles >= 3) {
-                 const subW = (wTiles - 2) * TILE_SIZE;
-                 const subX = x + TILE_SIZE;
-                 const subH = TILE_SIZE; // 1 tile high support
-                 solids.push({ x: subX, y: currentY, w: subW, h: subH });
-            }
-
-            // EDGE PLATFORMS: Prioritize extending edges with platforms
-            // 70% chance to add platforms to the sides
-            if (Math.random() < 0.7) {
-                const addLeft = Math.random() > 0.5;
-                const addRight = Math.random() > 0.5 || !addLeft; // Ensure at least one side often
-
-                if (addRight) {
-                     const platW = (1 + Math.floor(Math.random() * 2)) * TILE_SIZE;
-                     const platX = x + w;
-                     if (platX + platW < VIEW_WIDTH && this.isRegionFree(platX, currentY - hS, platW, 14, solids)) {
-                         platforms.push({ x: platX, y: currentY - hS, w: platW, h: 14 });
-                         this.lastX = platX + platW / 2; // Bias jump to platform
-                     }
-                }
-                if (addLeft) {
-                     const platW = (1 + Math.floor(Math.random() * 2)) * TILE_SIZE;
-                     const platX = x - platW;
-                     if (platX > 0 && this.isRegionFree(platX, currentY - hS, platW, 14, solids)) {
-                         platforms.push({ x: platX, y: currentY - hS, w: platW, h: 14 });
-                         // Only bias lastX if we didn't bias right
-                         if (!addRight) this.lastX = platX + platW / 2;
-                     }
-                }
-            }
-            
-            // Berry on Solid
-            if (Math.random() > 0.6) { 
-                if (Math.random() < 0.4) { 
-                    const offset = Math.random() > 0.5 ? -70 : w + 40;
-                    const berryX = x + offset;
-                    const berryY = currentY - hS - 20 - Math.random() * 60; 
-                    
-                    if (berryX > 30 && berryX < VIEW_WIDTH - 30) {
-                         // Strictly check berry position: Must be 24px away from any solid
-                         if (this.isRegionFree(berryX, berryY, 30, 30, solids, 24) && 
-                             this.isRegionFree(berryX, berryY, 30, 30, platforms, 24) &&
-                             !this.checkSolidOverlap(berryX, berryY, 30, 30, crystals as any[])) {
-                             
-                             berries.push({ x: berryX, y: berryY, w: 30, h: 30, baseY: berryY, state: 0 });
-                         }
-                    }
-                }
-            }
-
-            // Springs on Solids
-            if (Math.random() < 0.15) {
-                const springX = x + Math.floor(Math.random() * wTiles) * TILE_SIZE;
-                const noLeft = !this.isSolidAt(springX - TILE_SIZE, currentY - hS, solids);
-                const noRight = !this.isSolidAt(springX + TILE_SIZE, currentY - hS, solids);
-                
-                if (!this.isSolidAt(springX - TILE_SIZE, currentY - hS - TILE_SIZE, solids) && 
-                    !this.isSolidAt(springX + TILE_SIZE, currentY - hS - TILE_SIZE, solids) &&
-                    noLeft && noRight) {
-                        springs.push({
-                            x: springX, y: currentY - hS - TILE_SIZE, 
-                            w: TILE_SIZE, h: TILE_SIZE, 
-                            dir: 'up', animTimer: 0
-                        });
-                        this.lastWasSpringUp = true;
-                }
-            } 
-            else if (Math.random() < 0.15) {
-                const side = Math.random() > 0.5 ? 'right' : 'left';
-                const springX = side === 'right' ? x + w : x - TILE_SIZE;
-                const springY = (currentY - hS) + Math.floor(Math.random() * hTiles) * TILE_SIZE;
-                
-                let valid = false;
-                if (side === 'right' && springX + TILE_SIZE > VIEW_WIDTH - 2) valid = false;
-                else if (side === 'left' && springX < 2) valid = false;
-                else if (springX >= 0 && springX < VIEW_WIDTH) {
-                    if (this.isRegionFree(springX, springY, TILE_SIZE, TILE_SIZE, solids) &&
-                        this.isRegionFree(springX, springY, TILE_SIZE, TILE_SIZE, platforms)) {
-                        
-                        if (side === 'right') {
-                            if (this.isSolidAt(springX - TILE_SIZE, springY, solids)) valid = true;
-                        } else {
-                            if (this.isSolidAt(springX + TILE_SIZE, springY, solids)) valid = true;
+                // Natural Spring (25%)
+                if (Math.random() < 0.25) {
+                    const validW = wP - 48; 
+                    if (validW > 0) {
+                        const sX = xP + 24 + Math.floor(Math.random() * validW / 12) * 12;
+                        if (this.isRegionFree(sX, currentY - 24, 24, 24, crystals) &&
+                            this.isRegionFree(sX, currentY - 24, 24, 24, springs)) {
+                                springs.push({ x: sX, y: currentY - 24, w: 24, h: 24, dir: 'up', animTimer: 0 });
                         }
                     }
                 }
-
-                if (valid) {
-                    if (!this.isSolidAt(springX, springY - TILE_SIZE, solids) && !this.isSolidAt(springX, springY + TILE_SIZE, solids)) {
-                        springs.push({
-                            x: springX, y: springY,
-                            w: TILE_SIZE, h: TILE_SIZE,
-                            dir: side, animTimer: 0
-                        });
-                    }
+                // Side Spring (Rare)
+                if (Math.random() < 0.15) {
+                     const side = xP > VIEW_WIDTH/2 ? 'left' : 'right';
+                     const spX = side === 'left' ? xP - TILE_SIZE : xP + wP;
+                     if (spX > TILE_SIZE && spX < VIEW_WIDTH - TILE_SIZE * 2) {
+                         if (this.isRegionFree(spX, currentY + 12, 24, 24, crystals) &&
+                             this.isRegionFree(spX, currentY + 12, 24, 24, springs)) {
+                                 springs.push({ x: spX, y: currentY + 12, w: TILE_SIZE, h: TILE_SIZE, dir: side, animTimer: 0 });
+                         }
+                     }
                 }
+                this.spawnBridgeIfNeeded(this.lastX, this.lastSolidY, xP + wP/2, nextBottomY, crystals, springs, solids);
             }
-
-            return;
+            nextX = xP + wP / 2;
         }
 
-        // --- 3. One-way Platform Generation ---
-        const wTiles = 3 + Math.floor(Math.random() * 3);
-        const wP = wTiles * TILE_SIZE;
-        const xP = this.getReachableX(wP, currentHeightMeters);
-        
-        if (this.isRegionFree(xP, currentY, wP, 14, solids) &&
-            !this.checkSolidOverlap(xP, currentY, wP, TILE_SIZE, solids)) {
-            
-            platforms.push({ x: xP, y: currentY, w: wP, h: 14 });
-            this.lastX = xP + wP / 2;
-            
-            if (Math.random() > 0.8) {
-                 const bx = xP + wP / 2 - 15;
-                 const by = currentY - 40;
-                 if (this.isRegionFree(bx, by, 30, 30, solids, 24) &&
-                     this.isRegionFree(bx, by, 30, 30, platforms, 24)) {
-                     berries.push({ x: bx, y: by, w: 30, h: 30, baseY: by, state: 0 });
-                 }
-            }
+        // Apply Crumbling Attribute to the ENTIRE group of new solids
+        // 10% chance for the whole feature to be unstable
+        if (createdSolids.length > 0) {
+             if (Math.random() < 0.1) {
+                 createdSolids.forEach(s => {
+                     s.crumbling = true;
+                 });
+             }
         }
+
+        this.lastSolidY = nextSolidTopY;
+        this.lastX = nextX;
     }
 }

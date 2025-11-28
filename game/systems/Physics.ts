@@ -1,7 +1,6 @@
-
 import { GameEngine } from '../GameEngine';
 import { Rect, Platform, Solid } from '../../types';
-import { GRAVITY, MAX_FALL_SPEED, DASH_TIME, DASH_SPEED, MAX_SPEED, ACCEL_TIME, DECEL_TIME, WALL_SLIDE_SPEED, WALL_JUMP_X, WALL_JUMP_Y, JUMP_FORCE, SPRING_SPEED_Y, SPRING_SPEED_X, SPRING_SIDE_LIFT, COLORS } from '../../constants';
+import { GRAVITY, MAX_FALL_SPEED, DASH_TIME, DASH_SPEED, MAX_SPEED, ACCEL_TIME, DECEL_TIME, WALL_SLIDE_SPEED, WALL_JUMP_X, WALL_JUMP_Y, JUMP_FORCE, SPRING_SPEED_Y, SPRING_SPEED_X, SPRING_SIDE_LIFT, COLORS, TILE_SIZE } from '../../constants';
 import { sfx } from '../../services/audioService';
 
 export class Physics {
@@ -36,6 +35,89 @@ export class Physics {
         game.ripples.push({ x, y, r: 5, alpha: 1 });
     }
 
+    // Helper to determine if a block is "exposed" at the bottom
+    hasSolidBelow(game: GameEngine, s: Solid): boolean {
+        const checkX = s.x + s.w / 2;
+        const checkY = s.y + s.h + 2; // Check slightly below
+        for (const other of game.solids) {
+            if (other === s) continue;
+            // Simple point check is enough for grid-aligned blocks
+            if (checkX >= other.x && checkX <= other.x + other.w &&
+                checkY >= other.y && checkY <= other.y + other.h) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    triggerNeighbors(game: GameEngine, s: Solid) {
+        // Expand bounding box slightly to catch adjacent blocks
+        const pad = 2;
+        const triggerRect = { x: s.x - pad, y: s.y - pad, w: s.w + pad*2, h: s.h + pad*2 };
+
+        for (const other of game.solids) {
+            if (other === s) continue;
+            if (other.crumbling && !other.shaking && !other.falling) {
+                if (this.AABB(triggerRect, other)) {
+                    other.shaking = true;
+                    other.shakeTimer = 0.5;
+                    // Daisy chain: Neighbors trigger THEIR neighbors after another 0.15s
+                    other.neighborDelay = 0.15; 
+                }
+            }
+        }
+    }
+
+    updateSolids(game: GameEngine, dt: number) {
+        const snowLimitY = 24; // Snow fades after 1 tile
+
+        for (const s of game.solids) {
+            if (s.crumbling) {
+                // Optimization: Only spawn snow if there is NO block directly underneath
+                // This prevents "internal" snow rendering
+                if (!s.falling && Math.random() < 0.15) { 
+                    if (!this.hasSolidBelow(game, s)) {
+                        game.snow.push({
+                            x: s.x + Math.random() * s.w,
+                            y: s.y + s.h,
+                            vx: (Math.random() - 0.5) * 20,
+                            vy: 40 + Math.random() * 40,
+                            size: Math.random() * 2 + 1,
+                            life: 0.5 // Short life
+                        });
+                    }
+                }
+
+                if (s.shaking) {
+                    // Update main shake timer
+                    s.shakeTimer = (s.shakeTimer || 0) - dt;
+                    if (s.shakeTimer <= 0) {
+                        s.shaking = false;
+                        s.falling = true;
+                        s.vy = 0;
+                        game.vibrate(50);
+                    }
+
+                    // Chain Reaction Logic
+                    if (s.neighborDelay !== undefined && s.neighborDelay > 0) {
+                        s.neighborDelay -= dt;
+                        if (s.neighborDelay <= 0) {
+                            this.triggerNeighbors(game, s);
+                            s.neighborDelay = undefined; // Triggered
+                        }
+                    }
+                } else if (s.falling) {
+                    s.vy = (s.vy || 0) + (GRAVITY * 1.5) * dt; // Fall faster than player
+                    s.y += (s.vy || 0) * dt;
+                }
+            }
+        }
+        
+        // Cleanup fallen solids (optimization)
+        const limit = game.cameraY + game.viewHeight + 200;
+        game.solids = game.solids.filter(s => s.y < limit);
+    }
+
     resolveSolidsX(p: any, solids: Solid[]) {
         // AABB FIX: Extreme Anti-Snag & Step Up
         const trunkMargin = 7;
@@ -48,6 +130,10 @@ export class Physics {
             if (s.y + s.h <= p.y + 4) continue;
 
             if (this.AABB(rect, s)) {
+                // Safety: If completely inside (highly unlikely with step logic, but possible on generation spawn), push out closest side
+                const cx = p.x + p.w/2;
+                const scx = s.x + s.w/2;
+                
                 // Step Up Logic: Allow stepping up even if not grounded, as long as moving slightly up or flat
                 if (p.vy >= -200) { // Allow slight upward movement to step up
                     const stepMax = 6;
@@ -66,6 +152,10 @@ export class Physics {
                 } else if (p.vx < 0) {
                     p.x = s.x + s.w;
                     p.vx = 0;
+                } else {
+                    // Static overlap resolution (push away from center)
+                    if (cx < scx) p.x = s.x - p.w;
+                    else p.x = s.x + s.w;
                 }
             }
         }
@@ -99,6 +189,9 @@ export class Physics {
     }
 
     update(game: GameEngine, dt: number, input: { dir: number, jump: boolean, dash: boolean, jumpHeld: boolean }) {
+        // Update Solid Physics (Falling blocks)
+        this.updateSolids(game, dt);
+
         const p = game.player;
 
         // Wall Bounce
@@ -238,6 +331,13 @@ export class Physics {
                      p.y = s.y - p.h;
                      p.vy = 0;
                      p.grounded = true;
+                     
+                     // Trigger Crumbling Block
+                     if (s.crumbling && !s.shaking && !s.falling) {
+                         s.shaking = true;
+                         s.shakeTimer = 0.5; 
+                         s.neighborDelay = 0.15; // Trigger neighbors after 0.15s
+                     }
                 } 
                 else if (p.vy < 0 && overlapBottom < 20) {
                     // Ceiling Corner Correction: MUST HAPPEN BEFORE Y STOP
@@ -289,11 +389,7 @@ export class Physics {
 
                     // Execute Buffered Dash IMMEDIATELY
                     if (dashQueued) {
-                         // Reset dash buffer so it doesn't fire again next frame
-                         // p.dashBuffer = 0; // Don't clear, let main loop handle "effectiveDash"
-                         // Actually, we can just ensure it's picked up next frame, or force dash logic here?
-                         // Risk of state desync. The main loop will see (p.dashBuffer > 0 && p.canDash) next frame (16ms later).
-                         // This is usually acceptable "frame perfect" behavior.
+                         // Buffer handled in update loop
                     }
                 }
             }

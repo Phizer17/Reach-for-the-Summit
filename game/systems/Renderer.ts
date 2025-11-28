@@ -1,4 +1,3 @@
-
 import { GameEngine } from '../GameEngine';
 import { COLORS, VIEW_WIDTH, TILE_SIZE } from '../../constants';
 import { GameState } from '../../types';
@@ -71,18 +70,31 @@ export class Renderer {
         return false;
     }
 
-    drawTiledRect(game: GameEngine, x: number, y: number, w: number, h: number) {
+    drawTiledRect(game: GameEngine, x: number, y: number, w: number, h: number, shaking: boolean = false) {
         if (!this.tilesetImg) return;
         const ctx = this.ctx;
         const TS = TILE_SIZE;
+
+        let dx = 0, dy = 0;
+        if (shaking) {
+            dx = (Math.random() - 0.5) * 4;
+            dy = (Math.random() - 0.5) * 4;
+        }
         
-        const startX = Math.floor(x);
-        const startY = Math.floor(y);
+        const startX = Math.floor(x + dx);
+        const startY = Math.floor(y + dy);
         const endX = startX + w;
         const endY = startY + h;
 
-        for(let cx = startX; cx < endX; cx += TS) {
-            for(let cy = startY; cy < endY; cy += TS) {
+        // Use original logic to determine border tiles based on game grid (ignoring shake offset for neighbors)
+        const logicalX = Math.floor(x);
+        const logicalY = Math.floor(y);
+
+        for(let offsetCol = 0; offsetCol < w; offsetCol += TS) {
+            for(let offsetRow = 0; offsetRow < h; offsetRow += TS) {
+                const cx = logicalX + offsetCol;
+                const cy = logicalY + offsetRow;
+
                 // Check neighbors using the specific grid positions
                 // We add/subtract 2px to move safely into the neighbor cell
                 const u = this.isSolidAt(game, cx, cy - TS + 2);
@@ -96,17 +108,13 @@ export class Renderer {
                 else if (!l && !r) srcX = 72;
 
                 let srcY = 24; 
-                // Seamless vertical blending:
-                // If there is NO block above AND NO block below, use index 72 (Top+Bottom border).
-                // If there is NO block above (but one below), use index 0 (Top border).
-                // If there is NO block below (but one above), use index 48 (Bottom border).
-                // Otherwise (blocks above and below), use index 24 (No borders, middle pattern).
+                // Seamless vertical blending
                 if (!u && !d) srcY = 72;
                 else if (!u) srcY = 0;
                 else if (!d) srcY = 48;
                 else srcY = 24;
 
-                ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, cx, cy, TS, TS);
+                ctx.drawImage(this.tilesetImg, srcX, srcY, TS, TS, startX + offsetCol, startY + offsetRow, TS, TS);
             }
         }
     }
@@ -318,7 +326,7 @@ export class Renderer {
 
         // Draw Solids
         game.solids.forEach(s => {
-            this.drawTiledRect(game, s.x, s.y, s.w, s.h);
+            this.drawTiledRect(game, s.x, s.y, s.w, s.h, !!s.shaking);
         });
 
         // Draw Platforms

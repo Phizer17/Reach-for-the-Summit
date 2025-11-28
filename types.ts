@@ -1,4 +1,3 @@
-
 export enum GameState {
   TITLE = 'TITLE',
   PLAYING = 'PLAYING',
@@ -52,7 +51,14 @@ export interface PlayerState extends Rect {
 
 export interface Platform extends Rect {}
 
-export interface Solid extends Rect {}
+export interface Solid extends Rect {
+  crumbling?: boolean;
+  shaking?: boolean;
+  shakeTimer?: number;
+  falling?: boolean;
+  vy?: number;
+  neighborDelay?: number; // Time until neighbors are triggered
+}
 
 export interface Spring extends Rect {
   dir: 'up' | 'left' | 'right';

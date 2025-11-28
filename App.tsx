@@ -112,9 +112,6 @@ const App = () => {
     requestRef.current = requestAnimationFrame(animate);
     
     // FPS Management:
-    // We want to cap at ~60FPS, but not aggressively skip frames on 60Hz screens.
-    // 12ms threshold allows 144Hz screens (approx 7ms frame time) to skip every other frame,
-    // while 60Hz screens (approx 16.6ms) will pass the check every frame.
     const delta = time - lastFrameTimeRef.current;
     if (delta < 12) return; 
     
@@ -401,7 +398,7 @@ const App = () => {
                    {/* Speedometer */}
                    {gameState === GameState.PLAYING && (
                         <div className="bg-black/50 border-2 border-white/20 rounded-lg px-2 py-1 text-xs text-gray-300 text-right backdrop-blur-sm">
-                            <span className="text-white font-bold">{currentSpeed}</span> <span className="text-[10px] text-gray-400">SPEED</span>
+                            <span className="text-white font-bold">{currentSpeed}</span> <span className="text-[10px] text-gray-400">AVG</span>
                         </div>
                    )}
                </div>
@@ -513,13 +510,13 @@ const App = () => {
               {/* D-Pad Area */}
               <div className="flex gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className={`w-24 h-28 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.left ? 'bg-white/40 border-white' : ''}`}
+                   className={`w-[88px] h-[105px] bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.left ? 'bg-white/40 border-white' : ''}`}
                    onTouchStart={handleTouchStart('left')} onTouchEnd={handleTouchEnd('left')}
                  >
                    <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                  </div>
                  <div 
-                   className={`w-24 h-28 bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.right ? 'bg-white/40 border-white' : ''}`}
+                   className={`w-[88px] h-[105px] bg-white/10 border-2 border-white/30 rounded-2xl flex items-center justify-center transition-colors ${activeAction.right ? 'bg-white/40 border-white' : ''}`}
                    onTouchStart={handleTouchStart('right')} onTouchEnd={handleTouchEnd('right')}
                  >
                    <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
@@ -529,13 +526,13 @@ const App = () => {
               {/* Action Buttons with Visual Feedback */}
               <div className="flex flex-col gap-4 pointer-events-auto select-none" style={{ WebkitTouchCallout: 'none' }}>
                  <div 
-                   className={`w-24 h-24 bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.jump ? 'scale-95 bg-white/50' : ''}`}
+                   className={`w-[88px] h-[88px] bg-red-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.jump ? 'scale-95 bg-white/50' : ''}`}
                    onTouchStart={handleTouchStart('jump')} onTouchEnd={handleTouchEnd('jump')}
                  >
                     <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
                  </div>
                  <div 
-                   className={`w-24 h-24 bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.dash ? 'scale-95 bg-white/50' : ''}`}
+                   className={`w-[88px] h-[88px] bg-sky-500/40 border-2 border-white/30 rounded-full flex items-center justify-center transition-colors transform duration-75 ${activeAction.dash ? 'scale-95 bg-white/50' : ''}`}
                    onTouchStart={handleTouchStart('dash')} onTouchEnd={handleTouchEnd('dash')}
                  >
                     <svg className="w-10 h-10 fill-white" viewBox="0 0 24 24"><path transform="translate(0, 3)" d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41M7.41,9.41L12,4.83L16.59,9.41L18,8L12,2L6,8L7.41,9.41Z"/></svg>
